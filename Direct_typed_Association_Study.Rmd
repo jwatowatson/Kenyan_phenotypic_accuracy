@@ -1,0 +1,1088 @@
+---
+title: "Severe malaria in Kenya - improving phenotypic accuracy"
+author: "James Watson"
+date: "30/09/2020"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, cache.comments = FALSE,
+                      echo = TRUE, include = TRUE, 
+                      fig.width = 8, fig.height = 8,
+                      fig.pos = 'H',dev = 'png', dpi = 300)
+
+# library(SNPassoc)
+library(gtools)
+load('../RData/kemri_case_data.RData')
+load('../RData/kemri_control_data.RData')
+load('patient_SM_weights2.RData')
+kemri_case_data$P_SM = (ws_dat$ws)
+ndila_dat = readstata13::read.dta13('../Data/KEMRI/severe malaria dataset_Ndila et al (2018).dta')
+
+source('functions.R')
+library(rstan)
+options(mc.cores = parallel::detectCores())
+```
+
+
+```{r}
+ndila_dat$case_control = NA
+ndila_dat$weight = 1
+ndila_dat$ethnicity = NA
+ndila_dat$sex = NA
+ndila_dat$hba_alpha_thal = NA
+ids_missing=list()
+for(i in 1:nrow(ndila_dat)){
+  id1 = ndila_dat$sample_code[i]
+  if(id1 %in% kemri_case_data$sample_code){
+    k = which(kemri_case_data$sample_code==id1)
+    ndila_dat$case_control[i]=1
+    ndila_dat$weight[i] = kemri_case_data$P_SM[k]
+    ndila_dat$ethnicity[i] = kemri_case_data$ethnic[k]
+    ndila_dat$sex[i] = kemri_case_data$sex[k]
+    ndila_dat$hba_alpha_thal[i] = kemri_case_data$thal[k]
+  } else if (id1 %in% kemri_control_data$sample_code){
+    ndila_dat$case_control[i]=0
+    k = which(kemri_control_data$sample_code==id1)
+    ndila_dat$ethnicity[i] = kemri_control_data$ethnic[k]
+    ndila_dat$sex[i] = kemri_control_data$sex[k]
+    ndila_dat$hba_alpha_thal[i] = kemri_control_data$thal[k]
+  } else {
+    ids_missing=c(ids_missing,id1)
+  }
+}
+
+table(ndila_dat$sex, useNA = 'ifany')
+sort(table(ndila_dat$ethnicity))
+ndila_dat$ethnicity[!ndila_dat$ethnicity %in% c(4,8,13)] = 1
+ndila_dat$ethnicity = as.factor(ndila_dat$ethnicity)
+```
+
+
+```{r}
+# check this worked correctly
+nrow(kemri_case_data)+nrow(kemri_control_data)+length(ids_missing)==nrow(ndila_dat)
+
+ndila_dat[ndila_dat == 'XX'] = NA
+ndila_dat[ndila_dat == ''] = NA
+ndila_dat = ndila_dat[!is.na(ndila_dat$case_control), ]
+
+cases = !is.na(ndila_dat$case_control) & ndila_dat$case_control==1
+controls = !is.na(ndila_dat$case_control) & ndila_dat$case_control==0
+
+
+gene_models = read.csv(file = 'gene_Models.csv')
+gene_cols = gene_models$genes
+```
+
+
+Make a numerical dataset - 0,1,2
+```{r}
+ndila_dat_mod = ndila_dat
+WTs = array(dim = length(gene_cols))
+names(WTs) = gene_cols
+for(gg in gene_cols){
+  gene_characters = names(table(ndila_dat[,gg]))
+  number_trans = array(dim = length(gene_characters))
+  my_letters = strsplit(gene_characters, split = '')
+  if(length(unique(unlist(my_letters))) ==2){
+    WTs[which(gg==gene_cols)] = unique(unlist(my_letters))[1] # arbitrary choice
+    for(j in 1:length(my_letters)){
+      number_trans[j] = sum(my_letters[[j]]!=WTs[which(gg==gene_cols)])
+    }
+    ndila_dat_mod[, gg] = as.numeric(plyr::mapvalues(x = unlist(ndila_dat[,gg]), from = gene_characters, to = number_trans))
+  } else {
+    ndila_dat_mod[, gg] = NA
+    gene_cols[which(gene_cols==gg)]=NA
+  }
+}
+ndila_dat_mod$g6pd_rs1050828_F = ndila_dat_mod$g6pd_rs1050828
+ndila_dat_mod$g6pd_rs1050828_F[ndila_dat$sex==1]=NA
+ndila_dat_mod$g6pd_rs1050828_M = ndila_dat_mod$g6pd_rs1050828
+ndila_dat_mod$g6pd_rs1050828_M[ndila_dat$sex==2]=NA
+
+
+gene_cols = c(gene_cols, 'g6pd_rs1050828_F', 'g6pd_rs1050828_M')
+gene_cols = gene_cols[gene_cols != 'tpte2_rs182873742']
+```
+
+
+### Two-population model
+
+
+```{r}
+mm = stan_model(file = 'cat_logit_latent.stan')
+print(mm)
+
+cases = ndila_dat$case_control==1
+ndila_dat_mod$sex=as.factor(ndila_dat_mod$sex)
+
+alpha_P1s = alpha_P2s = array(dim = c(length(gene_cols), 3))
+rownames(alpha_P2s) = rownames(alpha_P1s)=gene_cols
+pval_difference = array(dim = length(gene_cols))
+names(pval_difference)=gene_cols
+for(gg in gene_cols){
+  i = which(gg==gene_cols)
+  ind = !is.na(ndila_dat_mod[, gg])
+  xx = model.matrix( ~ ethnicity, data = ndila_dat_mod)
+  xx = cbind(xx, ndila_dat_mod[, gg])
+  my_stan_data = list(Ncases = sum(ind & cases),
+                      Ncontrols = sum(ind & !cases),
+                      ps = ndila_dat_mod$weight[ind & cases],
+                      x_cases = xx[ind & cases, ],
+                      x_controls = xx[ind & !cases, ],
+                      D = ncol(xx))
+  
+  mm_out = optimizing(object = mm, data = my_stan_data, hessian = T)
+  myK=ncol(xx)
+  par1 = paste('beta_raw',myK,'1',sep='.')
+  par2 = paste('beta_raw',myK,'2',sep='.')
+  var1 = diag(solve(-mm_out$hessian))[par1]
+  var2 = diag(solve(-mm_out$hessian))[par2]
+  par1 = paste('beta[',myK,',1]',sep='')
+  par2 = paste('beta[',myK,',2]',sep='')
+  alpha_P1s[i, ] = mm_out$par[par1] + sqrt(var1)*c(-1.96,0,1.96)
+  alpha_P2s[i, ] = mm_out$par[par2] + sqrt(var2)*c(-1.96,0,1.96)
+  mean_diff = mm_out$par[par1]-mm_out$par[par2]
+  sd_diff = sqrt(var1+var2)
+  pval_difference[i] = 2 * pnorm(abs(mean_diff/sd_diff),lower.tail = FALSE)
+}
+
+alpha_P1s['hbb_rs334', ]/ alpha_P2s['hbb_rs334', ]
+alpha_P1s['g6pd_rs1050828_F', ]/ alpha_P2s['g6pd_rs1050828_F', ]
+
+sort(-log10(pval_difference))
+indsig = which(-log10(pval_difference)> -log10(0.05/74))
+writeLines('In population 1 (severe malaria), the effect sizes for the top hits are:\n')
+signif(exp(alpha_P1s[indsig,]), digits = 2)
+writeLines('\nIn population 2 (not severe malaria), the effect sizes for the top hits are:\n')
+signif(exp(alpha_P2s[indsig,]), digits = 2)
+sort(-log10(pval_difference))
+```
+
+
+Run the model of rs1050828 but the genotypes coded categorically
+```{r Fig6_differential_effects, fig.width=10, fig.height=10}
+
+
+gene_names = gene_cols#= gsub(pattern = '_',replacement = '\n',x = gene_cols)
+gene_names = gsub(pattern = '_F',replacement = '',x = gene_names)
+gene_names = gsub(pattern = '_M',replacement = '',x = gene_names)
+
+par(mfrow=c(2,2), las=1, bty='n', cex.lab=1.3, cex.axis=1.3, 
+    family='serif', mar=c(5,6,2,2))
+
+plot(alpha_P1s[, 2], alpha_P2s[, 2], pch=16, 
+     xlim=c(-4.2, 1), ylim=c(-1.5, 1),panel.first=grid(),
+     xlab="Log-odds: `severe malaria'",
+     ylab="Log-odds: `not severe malaria'", 
+     col = as.numeric(pval_difference< 0.05)+1)
+mtext(text = 'A', side = 3, adj = 0, cex = 1.5)
+abline(v=0, h=0,lty=2)
+lines(-4:4, -4:4, lty=2)
+for(i in 1:nrow(alpha_P1s)){
+  lines(alpha_P1s[i, c(1,3)], rep(alpha_P2s[i, 2],2), 
+        col = adjustcolor('grey',.6))
+  lines(rep(alpha_P1s[i, 2], 2), alpha_P2s[i, c(1,3)],
+        col = adjustcolor('grey',.6))
+}
+points(alpha_P1s[, 2], alpha_P2s[, 2], pch=16,
+       col = as.numeric(pval_difference< 0.05)+1)
+points(alpha_P1s[indsig, 2], alpha_P2s[indsig, 2],
+       pch=15,col='red')
+
+text(-3.1,-0.61,expression(atop(italic('HBB'),"rs334")), col='red', cex=1)
+text(-1.2,0.4,expression(atop(italic('G6PD'),"rs1050828")), col='red', cex=1)
+
+plot(1:length(gene_cols), -log10(pval_difference), 
+     pch=20, xaxt='n', xlab='Chromosome', 
+     ylab = '-log10 p-value', panel.first=grid(),
+     xlim = c(-5, length(gene_cols)+5), xaxt='n',
+     col = as.numeric(pval_difference< 0.05)+1)
+points((1:length(gene_cols))[indsig],
+       -log10(pval_difference)[indsig], 
+       pch=15,col ='red')
+abline( h = -log10(c(0.05, 0.05 / 70)), lty=2)
+mtext(text = 'B', side = 3, adj = 0, cex = 1.5)
+axis(1, labels = NA, at = c(-1000, 1000))
+ind = which(-log10(pval_difference)>2)
+
+text(x = (1:length(gene_cols))[ind[1]], 
+     y = -log10(pval_difference)[ind[1]]-.42,
+     labels = expression(atop(italic('ABO'),"rs8176719")),
+     col='red', cex=1)
+text(x = (1:length(gene_cols))[ind[2]], 
+     y = -log10(pval_difference)[ind[2]]-.42,
+     labels = expression(atop(italic('HBB'),"rs334")), 
+     col='red', cex=1)
+text(x = (1:length(gene_cols))[ind[3]], 
+     y = -log10(pval_difference)[ind[3]]-.5,
+     labels = expression(atop(italic('G6PD'),"rs1050828")),
+     col='red', cex=1)
+
+table(gene_models$Chr)
+my_chr = c(1,2,3,4,6,9,12,16,'X')
+for(cc in my_chr){
+  axis(1, at = median(which(gene_models$Chr==cc)), labels = cc)
+}
+
+par(mar=c(5,9,2,2))
+
+ind = !is.na(ndila_dat_mod[, 'g6pd_rs1050828'])
+ndila_dat_mod$g6pd_cat = as.factor(ndila_dat_mod$g6pd_rs1050828)
+xx = model.matrix( ~ ethnicity + g6pd_cat, data = ndila_dat_mod)
+my_stan_data = list(Ncases = sum(ind & cases),
+                    Ncontrols = sum(ind & !cases),
+                    ps = ndila_dat_mod$weight[ind & cases],
+                    x_cases = xx[ind & cases, ],
+                    x_controls = xx[ind & !cases, ],
+                    D = ncol(xx))
+
+mm_out = optimizing(object = mm, data = my_stan_data, hessian = T)
+par1 = paste('beta_raw',5:6,'1',sep='.')
+par2 = paste('beta_raw',5:6,'2',sep='.')
+var1 = diag(solve(-mm_out$hessian))[par1]
+var2 = diag(solve(-mm_out$hessian))[par2]
+par1 = paste('beta[',5:6,',1]',sep='')
+par2 = paste('beta[',5:6,',2]',sep='')
+res = rbind(mm_out$par[par1][1] + sqrt(var1)[1]*c(-1.96,0,1.96),
+            mm_out$par[par2][1] + sqrt(var2)[1]*c(-1.96,0,1.96),
+            mm_out$par[par1][2] + sqrt(var1)[2]*c(-1.96,0,1.96),
+            mm_out$par[par2][2] + sqrt(var2)[2]*c(-1.96,0,1.96))
+
+mean_diff = mm_out$par[par1]-mm_out$par[par2]
+sd_diff = sqrt(var1+var2)
+g6pd_pvals = ( 2 * pnorm(abs(mean_diff/sd_diff),lower.tail = FALSE))
+
+eps=0.1
+plot(res[,2], 1:4, xlim=range(res), ylim = c(1-eps, 4+eps),
+     pch=16, yaxt='n', ylab='', panel.first=grid(), 
+     xlab='Log-odds relative to population controls')
+mtext(text = 'C', side = 3,adj = 0, cex = 1.5)
+abline(v=0, lty=2)
+for(i in 1:2){
+  lines(res[i, c(1,3)], c(i,i), lwd=3)
+}
+for(i in 3:4){
+  lines(res[i, c(1,3)], c(i,i), lwd=3)
+}
+axis(2, at=1:4, labels = c('SM:\nheterozygote',
+                           'not SM:\nheterozygote',
+                           'SM:\nhemi/homozygote',
+                           'not SM:\nhemi/homozygote'))
+text(x=0.4, y=1.5, 
+     labels = paste('Differential effect:\np',signif(g6pd_pvals[1],2),sep = '='),cex = 1.2)
+text(x= -0.25, y=3.5, 
+     labels = paste('Differential effect:\np',signif(g6pd_pvals[2],2),sep = '='),cex = 1.2)
+
+
+
+ind = !is.na(ndila_dat[, 'abo_rs8176719'])
+ndila_dat$abo = as.numeric(ndila_dat$abo_rs8176719=='DD')
+xx = model.matrix( ~ ethnicity, data = ndila_dat)
+xx = cbind(xx, abo=ndila_dat$abo)
+my_stan_data = list(Ncases = sum(ind & cases),
+                    Ncontrols = sum(ind & !cases),
+                    ps = ndila_dat$weight[ind & cases],
+                    x_cases = xx[ind & cases, ],
+                    x_controls = xx[ind & !cases, ],
+                    D = ncol(xx))
+mm_out = optimizing(object = mm, data = my_stan_data, hessian = T)
+par1 = paste('beta_raw',5,'1',sep='.')
+par2 = paste('beta_raw',5,'2',sep='.')
+var1 = diag(solve(-mm_out$hessian))[par1]
+var2 = diag(solve(-mm_out$hessian))[par2]
+par1 = paste('beta[',5,',1]',sep='')
+par2 = paste('beta[',5,',2]',sep='')
+res_abo=rbind(mm_out$par[par1][1] + sqrt(var1)[1]*c(-1.96,0,1.96),
+              mm_out$par[par2][1] + sqrt(var2)[1]*c(-1.96,0,1.96))
+
+mean_diff = mm_out$par[par1]-mm_out$par[par2]
+sd_diff = sqrt(var1+var2)
+abo_pval = 2*pnorm(abs(mean_diff/sd_diff),lower.tail = FALSE)
+
+ind = !is.na(ndila_dat_mod[, 'frem3_rs186790584'])
+xx = model.matrix( ~ ethnicity, data = ndila_dat_mod)
+xx = cbind(xx, ndila_dat_mod[, 'frem3_rs186790584'])
+my_stan_data = list(Ncases = sum(ind & cases),
+                    Ncontrols = sum(ind & !cases),
+                    ps = ndila_dat_mod$weight[ind & cases],
+                    x_cases = xx[ind & cases, ],
+                    x_controls = xx[ind & !cases, ],
+                    D = ncol(xx))
+mm_out = optimizing(object = mm, data = my_stan_data, hessian = T)
+par1 = paste('beta_raw',5,'1',sep='.')
+par2 = paste('beta_raw',5,'2',sep='.')
+var1 = diag(solve(-mm_out$hessian))[par1]
+var2 = diag(solve(-mm_out$hessian))[par2]
+par1 = paste('beta[',5,',1]',sep='')
+par2 = paste('beta[',5,',2]',sep='')
+res_frem3=rbind(mm_out$par[par1][1] + sqrt(var1)[1]*c(-1.96,0,1.96),
+                mm_out$par[par2][1] + sqrt(var2)[1]*c(-1.96,0,1.96))
+mean_diff = mm_out$par[par1]-mm_out$par[par2]
+sd_diff = sqrt(var1+var2)
+frem_pval = 2*pnorm(abs(mean_diff/sd_diff),lower.tail = FALSE)
+
+
+eps=0.1
+res = rbind(res_abo, res_frem3)
+plot(res[,2], 1:4, xlim=range(res), ylim = c(1-eps, 4+eps),
+     pch=16, yaxt='n', ylab='', panel.first=grid(), 
+     xlab='Log-odds relative to population controls')
+abline(v=0, lty=2)
+for(i in 1:2){
+  lines(res[i, c(1,3)], c(i,i), lwd=3)
+}
+for(i in 3:4){
+  lines(res[i, c(1,3)], c(i,i), lwd=3)
+}
+axis(2, at = 1:4, labels = F)
+axis(2, at=3, labels = expression(paste('SM: ', italic(FREM3))))
+axis(2, at=4, labels = expression(paste('not SM: ', italic(FREM3))))
+
+axis(2, at=1:2, labels = c('SM:\n O Blood Group','not SM:\n O Blood Group'))
+text(x= -0.4, y=1.5, 
+     labels = paste('Differential effect:\np=',signif(abo_pval[1],2),sep = ''),cex = 1.2)
+text(x= -0.4, y=3.5, 
+     labels = paste('Differential effect: \np=',signif(frem_pval[1],2),sep = ''),cex = 1.2)
+mtext(text = 'D', side = 3,adj = 0, cex = 1.5)
+
+```
+
+
+
+
+
+
+
+```{r run_models}
+snps = c('abo_rs8176719',
+         'atp2b4_rs1541255',
+         'il10_rs1800890',
+         'lphn2_rs72933304',
+         'loc727982_rs1371478',
+         'arl14_rs75731597',
+         'frem3_rs186873296',
+         'inpp4b_rs77389579',
+         'hbb_rs334',
+         'rps6kl1_rs3742785',
+         'abo_rs8176746',
+         'hba_alpha_thal',
+         'g6pd_rs1050828',
+         'cd40lg_rs3092945')
+
+testing_data = ndila_dat[,c('case_control','weight','sex','ethnicity', snps)]
+testing_data$sex = as.factor(ndila_dat$sex)
+males = ndila_dat$sex==1
+females = !males
+# O blood group
+testing_data$abo_rs8176719 = as.numeric(ndila_dat$abo_rs8176719=='DD')
+testing_data$atp2b4_rs1541255 = as.numeric(ndila_dat$atp2b4_rs1541255=='GG')
+testing_data$il10_rs1800890 = as.numeric(ndila_dat$il10_rs1800890=='TT')
+testing_data$lphn2_rs72933304 =
+  as.numeric(plyr::mapvalues(ndila_dat$lphn2_rs72933304,
+                             from=c('AA','AC','CC'), to=0:2))
+testing_data$loc727982_rs1371478 =as.numeric(ndila_dat$loc727982_rs1371478=='CT')
+testing_data$arl14_rs75731597 = as.numeric(ndila_dat$arl14_rs75731597=='AC')
+testing_data$frem3_rs186873296 =
+  as.numeric(plyr::mapvalues(ndila_dat$frem3_rs186873296,
+                             from=c('AA','AG','GG'), to=0:2))
+testing_data$inpp4b_rs77389579 =
+  as.numeric(plyr::mapvalues(ndila_dat$inpp4b_rs77389579,
+                             from=c('GG','GT','TT'), to=0:2))
+testing_data$hbb_rs334 = as.numeric(ndila_dat$hbb_rs334=='AT')
+testing_data$rps6kl1_rs3742785 = as.numeric(ndila_dat$rps6kl1_rs3742785=='AC')
+testing_data$abo_rs8176746 = 
+  as.numeric(plyr::mapvalues(ndila_dat$abo_rs8176746,
+                             from=c('CC','AC','AA'), to=0:2))
+testing_data$hba_alpha_thal = as.numeric(ndila_dat$hba_alpha_thal==3)
+
+testing_data$g6pd_rs1050828_A_all=
+  as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828,
+                             from=c('CC','CT','TT'), to=0:2))
+
+testing_data$g6pd_rs1050828_males=as.numeric(ndila_dat$g6pd_rs1050828=='TT')
+testing_data$g6pd_rs1050828_males[females]=NA
+
+testing_data$g6pd_rs1050828_A_females=testing_data$g6pd_rs1050828_A_all
+testing_data$g6pd_rs1050828_A_females[males]=NA
+
+testing_data$g6pd_rs1050828_H_females=as.numeric(ndila_dat$g6pd_rs1050828=='CT')
+testing_data$g6pd_rs1050828_H_females[males]=NA
+
+testing_data$cd40lg_rs3092945_all = 
+  as.numeric(plyr::mapvalues(ndila_dat$cd40lg_rs3092945,
+                             from=c('TT','CT','CC'), to=0:2))
+testing_data$cd40lg_rs3092945_females = testing_data$cd40lg_rs3092945_all
+testing_data$cd40lg_rs3092945_females[males] =NA
+testing_data$cd40lg_rs3092945_males= testing_data$cd40lg_rs3092945_all
+testing_data$cd40lg_rs3092945_males[females] =NA
+
+testing_data = testing_data[, -which(colnames(testing_data) %in% c("g6pd_rs1050828",
+                                                                   "cd40lg_rs3092945" ))]
+K = ncol(testing_data)-4
+effects = array(dim = c(K, 6))
+pvalues = array(dim = c(K, 2))
+rownames(pvalues) = rownames(effects) = colnames(testing_data)[-(1:4)]
+colnames(pvalues) = c('weighted','not-weighted')
+mod1_list = mod2_list = list()
+
+for(gg in rownames(effects)){
+  i = which(gg==rownames(effects))
+  ng = length(unique(testing_data[!is.na(testing_data[,gg]),gg]))-1
+  mydat = data.frame(cc=testing_data$case_control,
+                     gene=testing_data[,gg],
+                     ws=testing_data$weight,
+                     sex= as.factor(testing_data$sex),
+                     ethnicity= as.factor(testing_data$ethnicity))
+  mod1 = glm(cc~gene+ethnicity, data = mydat, family='quasibinomial', weights = ws)
+  mod2 = glm(cc~gene+ethnicity, data = mydat, family='binomial')
+  
+  mod1_list[[i]]=mod1
+  mod2_list[[i]]=mod2
+  cov.m1 <- sandwich::vcovHC(mod1, type = "HC0")
+  std.err <- sqrt(diag(cov.m1))['gene']
+  coef_W = coef(mod1)['gene']
+  coef_W = coef_W *sign(coef_W)
+  effects[i, 1:3] = c(coef_W-1.96*std.err, coef_W, coef_W+1.96*std.err)
+  pvalues[i, 1] = -log10( 2 * pnorm(abs(coef_W/std.err), 
+                                    lower.tail = FALSE))
+  
+  std.err = summary(mod2)$coefficients['gene', 'Std. Error']
+  coef_NW = coef(mod2)['gene']
+  coef_NW = coef_NW *sign(coef_NW)
+  effects[i, 4:6] = c(coef_NW-1.96*std.err, coef_NW, coef_NW+1.96*std.err)
+  pvalues[i,2] = -log10(summary(mod2)$coefficients['gene', 'Pr(>|z|)'])
+}
+
+
+names_snps = toupper(unlist(lapply(rownames(effects), function(x) strsplit(x,split = '_')[[1]][1])))
+names_snps[1]=paste(names_snps[1], '(OBG)', sep=' ') 
+names_snps[11]=paste(names_snps[11], '(BBG)', sep=' ') 
+names_snps[13]=paste(names_snps[13], '(A: M/F)', sep=' ') 
+names_snps[14]=paste(names_snps[14], '(M)', sep=' ') 
+names_snps[15]=paste(names_snps[15], '(A: F)', sep=' ') 
+names_snps[16]=paste(names_snps[16], '(H: F)', sep=' ') 
+names_snps[17]=paste(names_snps[17], '(A: M/F)', sep=' ') 
+names_snps[18]=paste(names_snps[18], '(F)', sep=' ') 
+names_snps[19]=paste(names_snps[19], '(M)', sep=' ') 
+
+```
+
+
+
+
+```{r effect_sizes, fig.height=8, fig.width=12}
+par(las=1, bty='n', family='serif', 
+    mfrow=c(1, 2), cex.lab=1.5, cex.axis=1.5)
+
+require(plotrix)
+from = .61
+to = 1.8
+gap.plot(effects[,5], 100*(effects[,2]-effects[,5])/effects[,5],
+         pch='', ylim = c(-30, 90),
+         gap.axis = 'x', gap=c(from,to),xlim = c(0, 1.92),
+         ytics = c(-30, 0, 60, 20, 90),
+         xtics = c(0,.25,.5,1.85),
+         xlab = 'Effect size (non-weighted model)',
+         ylab = 'Change in effect sizes (%)')
+axis.break(1, from, breakcol="snow", style="gap")
+axis.break(1, from*(1+0.02), breakcol="black", style="slash")
+text(effects[,5], 100*(effects[,2]-effects[,5])/effects[,5],
+     labels = names_snps,cex=.8)
+text(effects[9,5]-(to-from),100*(effects[9,2]-effects[9,5])/effects[9,5],
+     names_snps[9])
+abline(h=0, lty=2)
+mtext(text = 'A', side = 3, adj = 0, cex = 1.5)
+
+from = 13
+to = 35
+gap.plot(pvalues[,2], pvalues[,1]-pvalues[,2],pch='', 
+         gap=c(from,to), gap.axis = 'x', xtics = c(0,3,6,9,12,38), 
+         ytics = c(-1, -0.5, 0, 0.5, 1, 1.5),xlim = c(-1,40),
+         xlab = '-log10 p-value (non-weighted model)',
+         ylab = 'Difference in -log10 p-values')
+axis.break(1, from, breakcol="snow", style="gap")
+axis.break(1, from*(1+0.02), breakcol="black", style="slash")
+abline(h=0, lty=2)
+text(pvalues[-4,2],pvalues[-4,1]-pvalues[-4,2], 
+     labels = names_snps[-4], cex=.8)
+text(pvalues[9,2]-(to-from),pvalues[9,1]-pvalues[9,2], names_snps[9])
+
+mtext(text = 'B', side = 3, adj = 0, cex = 1.5)
+```
+
+
+
+
+
+
+```{r, direct_typed, fig.width=12, fig.height=12}
+par(mfrow=c(3,4),las=1)
+## O Blood group
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$abo_rs8176719[cases]=='DD'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+xs=seq(0,1,length.out = 100)[-1]
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(ys),
+     xlab='P(Severe malaria | Data)', ylab='ABO - O Blood Group (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=100*mean(as.numeric(ndila_dat$abo_rs8176719[controls]=='DD'),na.rm=T),
+       lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+## ATP2B4
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$atp2b4_rs1541255[cases]=='GG'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(ys),
+     xlab='P(Severe malaria | Data)', ylab='Homozygous ATP2B4 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=100*mean(as.numeric(ndila_dat$atp2b4_rs1541255[controls]=='GG'),na.rm=T),
+       lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+## IL10
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$il10_rs1800890[cases]=='TT'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(ys),
+     xlab='P(Severe malaria | Data)', ylab='Homozygous IL10 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=100*mean(as.numeric(ndila_dat$il10_rs1800890[controls]=='TT'),na.rm = T),lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## LPHN2
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$lphn2_rs72933304[cases],
+                                                        from=c('AA','AC','CC'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+xs=seq(0,1,length.out = 100)[-1]
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(ys),
+     xlab='P(Severe malaria | Data)', ylab='LPHN2 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$lphn2_rs72933304[controls],
+                                                            from=c('AA','AC','CC'), to=0:2))/2),weight=rep(2, sum(controls)))
+abline(h=100*inv.logit(coef(modcont)),lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## LOC727982
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$loc727982_rs1371478[cases]=='CT'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+xs=seq(0,1,length.out = 100)[-1]
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$loc727982_rs1371478[controls]=='CT'),na.rm = T)
+
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys, con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Het LOC727982 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=100*mean(as.numeric(ndila_dat$loc727982_rs1371478[controls]=='CT'),na.rm = T),lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## ARL14
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$arl14_rs75731597[cases]=='AC'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+xs=seq(0,1,length.out = 100)[-1]
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$arl14_rs75731597[controls]=='AC'),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Het ARL14 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## FREM3
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$frem3_rs186873296[cases],
+                                                        from=c('AA','AG','GG'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$frem3_rs186873296[controls],
+                                                            from=c('AA','AG','GG'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='FREM3 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## INPP
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$inpp4b_rs77389579[cases],
+                                                        from=c('GG','GT','TT'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$inpp4b_rs77389579[controls],
+                                                            from=c('GG','GT','TT'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='INPP4B (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+
+## HBB
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hbb_rs334[cases]=='AT'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$hbb_rs334[controls]=='AT'),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Het HBB (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+
+## RPS6KL1
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$rps6kl1_rs3742785[cases]=='AC'),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+xs=seq(0,1,length.out = 100)[-1]
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$rps6kl1_rs3742785[controls]=='AC'),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Het RPS6KL1 (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## Blood group B
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$abo_rs8176746[cases],
+                                                        from=c('CC','AC','AA'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$abo_rs8176746[controls],
+                                                            from=c('CC','AC','AA'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='ABO - B Blood Group (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+##Alpha-thal
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hba_alpha_thal[cases]==3),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=(ndila_dat$hba_alpha_thal[controls]-1)/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Alpha-thal (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## G6PD - all
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases],
+                                                        from=c('CC','CT','TT'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls],
+                                                            from=c('CC','CT','TT'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='G6PD A- (males & females %)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## G6PD - males
+males = ndila_dat$sex==1
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases&males],
+                                                        from=c('CC','TT'), to=0:1)),
+                        ws = ndila_dat$weight[cases&males]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls&males],
+                                                            from=c('CC','TT'),
+                                                            to=0:1))),
+            weight=rep(2, sum(controls&males)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='G6PD A- (males %)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## G6PD - females - additive model
+females = !males
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases&females],
+                                                        from=c('CC','CT','TT'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases&females]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls&females],
+                                                            from=c('CC','CT','TT'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls&females)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='G6PD A- (additive model females %)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+
+## G6PD - females
+females = !males
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(ndila_dat$g6pd_rs1050828[cases&females]=='CT'),
+                        ws = ndila_dat$weight[cases&females]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(ndila_dat$g6pd_rs1050828[controls&females]=='CT')))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='G6PD A- (het model females %)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(signif(summary(mod)$coefficients['ws',4],digits = 3))
+
+```
+
+
+
+Sickle cell disease - problem with model
+```{r}
+## HBB - homozygous TT
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hbb_rs334[cases]=='TT'),
+                        ws = ndila_dat$weight[cases],
+                        sex=as.factor(ndila_dat$sex[cases]),
+                        ethnicity=as.factor(ndila_dat$ethnicity[cases])))
+summary(mod)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(ws=xs,
+                                     sex=as.factor(1),
+                                     ethnicity=as.factor(1)))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$hbb_rs334[controls]=='TT'),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='HbS: TT vs AA (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title('Sickle cell anaemia',cex.main=2)
+text(x = .8, y = 15,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+```
+
+
+The main ones
+```{r important_polymorphisms, fig.width=12, fig.height=12}
+par(mfrow=c(3,3), las=1, family='serif', bty='n',
+    cex.lab=1.5, cex.axis=1.5, mar=c(5,6,4,2))
+
+xs=seq(0,1,length.out = 100)[-1]
+## HBB - het AT 
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hbb_rs334[cases]=='AT'),
+                        ws = ndila_dat$weight[cases],
+                        sex=as.factor(ndila_dat$sex[cases]),
+                        ethnicity=as.factor(ndila_dat$ethnicity[cases])))
+summary(mod)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(ws=xs,
+                                     sex=as.factor(1),
+                                     ethnicity=as.factor(1)))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$hbb_rs334[controls]=='AT'),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs334: AT (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title(expression(italic('HBB')),cex.main=2)
+text(x = .8, y=10,
+     paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+
+## HBB - het AT and alpha-thal
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hbb_rs334[cases]=='AT' &
+                                          ndila_dat$hba_alpha_thal[cases]==3),
+                        ws = ndila_dat$weight[cases],
+                        sex=as.factor(ndila_dat$sex[cases]),
+                        ethnicity=as.factor(ndila_dat$ethnicity[cases])))
+summary(mod)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(ws=xs,
+                                     sex=as.factor(1),
+                                     ethnicity=as.factor(1)))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+con_val = 100*mean(as.numeric(ndila_dat$hbb_rs334[controls]=='AT'&
+                                ndila_dat$hba_alpha_thal[controls]==3),na.rm = T)
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs334: AT & homozygous deletion (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=con_val,lwd=3,lty=2)
+title(expression(italic('HBB & HBA')),cex.main=2)
+text(x = .8, y = 3,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+## O Blood group
+mod=glm(gene ~ws, family='binomial',
+        data=data.frame(gene=as.numeric(ndila_dat$abo_rs8176719[cases]=='DD'),
+                        ws = ndila_dat$weight[cases],
+                        sex=as.factor(ndila_dat$sex[cases]),
+                        ethnicity=as.factor(ndila_dat$ethnicity[cases])))
+summary(mod)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(ws=xs,
+                                     sex=as.factor(1),
+                                     ethnicity=as.factor(1)))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(ys),
+     xlab='P(Severe malaria | Data)', ylab='Homozygous deletion: OBG (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+abline(h=100*mean(as.numeric(ndila_dat$abo_rs8176719[controls]=='DD'),na.rm=T),
+       lwd=3,lty=2)
+title(expression(italic('ABO')),cex.main=2)
+text(x = .8, y = 50,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+### FREM3
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$frem3_rs186873296[cases],
+                                                        from=c('AA','AG','GG'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases],
+                        sex=as.factor(ndila_dat$sex[cases]),
+                        ethnicity=as.factor(ndila_dat$ethnicity[cases])))
+summary(mod)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(ws=xs,
+                                     sex=as.factor(1),
+                                     ethnicity=as.factor(1)))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$frem3_rs186873296[controls],
+                                                            from=c('AA','AG','GG'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs186873296: G allele (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(italic('FREM3')),cex.main=2)
+text(x = .8, y = 9,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+
+##Alpha-thal
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(ndila_dat$hba_alpha_thal[cases]==3),
+                        ws = ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(ndila_dat$hba_alpha_thal[controls]==3)),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='Homozygous deletion (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(italic('HBA')),cex.main=2)
+text(x = .8, y = 15,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+
+## G6PD - all
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases],
+                                                        from=c('CC','CT','TT'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls],
+                                                            from=c('CC','CT','TT'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs1050828: T allele (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(paste(italic('G6PD'), ' (all, A)')),cex.main=2)
+text(x = .8, y = 24,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+## G6PD - males
+males = ndila_dat$sex==1
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases&males],
+                                                        from=c('CC','TT'), to=0:1)),
+                        ws = ndila_dat$weight[cases&males]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls&males],
+                                                            from=c('CC','TT'),
+                                                            to=0:1))),
+            weight=rep(2, sum(controls&males)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs1050828: T allele (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(paste(italic('G6PD'), ' (males)')),cex.main=2)
+text(x = .8, y = 25,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+## G6PD - females - additive model
+females = !males
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[cases&females],
+                                                        from=c('CC','CT','TT'), to=0:2))/2,
+                        ws = 2*ndila_dat$weight[cases&females]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(plyr::mapvalues(ndila_dat$g6pd_rs1050828[controls&females],
+                                                            from=c('CC','CT','TT'),
+                                                            to=0:2))/2),
+            weight=rep(2, sum(controls&females)))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs1050828: T allele (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(paste(italic('G6PD'), ' (females, A)')),cex.main=2)
+text(x = .8, y = 25,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+## G6PD - females
+females = !males
+mod=glm(gene ~ws, family='quasibinomial',
+        data=data.frame(gene=as.numeric(ndila_dat$g6pd_rs1050828[cases&females]=='CT'),
+                        ws = ndila_dat$weight[cases&females]))
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(ws=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+modcont=glm(gene ~ 1, family='quasibinomial',
+            data=data.frame(gene=as.numeric(ndila_dat$g6pd_rs1050828[controls&females]=='CT')))
+con_val = 100*inv.logit(coef(modcont))
+plot(xs, 100*inv.logit(preds$fit), type='l', ylim=range(c(ys,con_val)),
+     xlab='P(Severe malaria | Data)', ylab='rs1050828: CT (%)')
+polygon(c(xs, rev(xs)),ys,border = NA, col = adjustcolor('grey',.3))
+
+abline(h=con_val,lwd=3,lty=2)
+title(expression(paste(italic('G6PD'), ' (females, H)')),cex.main=2)
+text(x = .8, y = 35,paste('p',signif(summary(mod)$coefficients['ws',4],digits = 1),sep='='),cex=2)
+
+```
+
+
+
+
+
+
+
