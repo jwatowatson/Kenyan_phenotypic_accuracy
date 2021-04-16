@@ -1,0 +1,19 @@
+---
+title: "Extra Analyses"
+author: "James Watson"
+date: "4/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data
+
+XXX **This needs data not included in the git release to be run** XXX
+
+```{r}
+load('../RData/kemri_case_data.RData')
+```
+

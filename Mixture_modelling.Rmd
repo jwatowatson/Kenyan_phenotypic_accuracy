@@ -2,7 +2,10 @@
 title: "Severe malaria in Kenya - improving phenotypic accuracy"
 author: "James Watson"
 date: "30/09/2020"
-output: html_document
+output: 
+  html_document: 
+    toc: yes
+    keep_md: yes
 ---
 
 
@@ -11,6 +14,10 @@ knitr::opts_chunk$set(cache = TRUE, cache.comments = FALSE,
                       echo = TRUE, include = TRUE, 
                       fig.width = 8, fig.height = 8,
                       fig.pos = 'H',dev = 'png', dpi = 300)
+```
+
+
+```{r}
 library(gtools)
 library(ellipse)
 library(rstan)
@@ -19,7 +26,7 @@ library(tictoc)
 require(plyr)
 library(dplyr)
 library(rstan)
-#library(mvtnorm)
+library(mvtnorm)
 #library(ks)
 #library(weights)
 library(mgcv)
@@ -27,11 +34,16 @@ library(RColorBrewer)
 
 RUN_STAN = F # if TRUE this runs the model on individual patient probabilities - takes about 10 hours
 options(mc.cores = parallel::detectCores()-1)
+
+version
+sessionInfo()
 ```
 
 Load curated dataset
 ```{r}
 load('Inputs/curated_modelling_dataset.RData')
+# load imputed datasets
+load('Inputs/imputed_Vietam_minimal.RData')
 ```
 
 
@@ -85,7 +97,8 @@ for(qq in my_contours){
   lines(ellipse(x = Model_sigma, centre = Model_mu, 
                 level = qq), lty=2,lwd=3,col='darkgreen')
   
-  lines(ellipse(x = cov(dat_kenya), centre = colMeans(dat_kenya), 
+  lines(ellipse(x = cov(dat_kenya[,c("platelets_log10","wbc_log10")],use = 'comp'), 
+                centre = colMeans(dat_kenya[,c("platelets_log10","wbc_log10")],na.rm = T), 
                 level = qq), lty=2,lwd=3,col='purple')
 }
 mtext(text = panels[1], side = 3, line = 1, adj = 0, cex=1.5)
@@ -117,15 +130,15 @@ axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))),
 
 # make index for blood slide +/-
 dat_feast_hrp2$type=2
-  ind_0parasite = which(!is.na(dat_feast_hrp2$) & dat_feast$parasitaemia==0)
-dat_feast$type[ind_0parasite] = 3
-points(log10(dat_feast$platelets), log10(dat_feast$hrp2),
-       pch=c(15,17)[(dat_feast$type-1)], 
-       col= adjustcolor(mycols[dat_feast$type], .6), cex=1.2)
+ind_0parasite = which(!is.na(dat_feast_hrp2$hrp2) & dat_feast_hrp2$parasitaemia==0)
+dat_feast_hrp2$type[ind_0parasite] = 3
+points(log10(dat_feast_hrp2$platelets), log10(dat_feast_hrp2$hrp2),
+       pch=c(15,17)[(dat_feast_hrp2$type-1)], 
+       col= adjustcolor(mycols[dat_feast_hrp2$type], .6), cex=1.2)
 
-ind_spline = !is.na(dat_feast$platelets) & dat_feast$platelets>10
-f=smooth.spline(y = log10(dat_feast$hrp2[ind_spline]),
-                x = log10(dat_feast$platelets[ind_spline]))
+ind_spline = !is.na(dat_feast_hrp2$platelets) & dat_feast_hrp2$platelets>10
+f=smooth.spline(y = log10(dat_feast_hrp2$hrp2[ind_spline]),
+                x = log10(dat_feast_hrp2$platelets[ind_spline]))
 lines(f, lwd=4, col='grey',lty=1)
 lines(0:10, mycoefs[1]+mycoefs[2]*(0:10), lwd=4, col=mycols[1],lty=1)
 legend('topright', legend = c('Bangladesh (adults)', 
@@ -155,16 +168,11 @@ axis(side = 1, at = axis_points[[1]],
 axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))), 
      tick = T, labels = F)
 
-dat_feast$type=2
-ind_0parasite = which(!is.na(dat_feast$parasitaemia) & dat_feast$parasitaemia==0)
-dat_feast$type[ind_0parasite] = 3
-points(log10(dat_feast$platelets), log10(dat_feast$hrp2),
-       pch=c(15,17)[(dat_feast$type-1)], 
-       col= adjustcolor(mycols[dat_feast$type], .6), cex=1.2)
 
-ind_spline = !is.na(dat_feast$platelets) & dat_feast$platelets>10
-f=smooth.spline(y = log10(dat_feast$hrp2[ind_spline]),
-                x = log10(dat_feast$platelets[ind_spline]))
+points(log10(dat_feast_hrp2$platelets), log10(dat_feast_hrp2$hrp2),
+       pch=c(15,17)[(dat_feast_hrp2$type-1)], 
+       col= adjustcolor(mycols[dat_feast_hrp2$type], .6), cex=1.2)
+
 lines(f, lwd=4, col='grey',lty=1)
 lines(0:10, mycoefs[1]+mycoefs[2]*(0:10), lwd=4, col=mycols[1],lty=1)
 abline(v = log10(200), lty=2)
@@ -175,19 +183,14 @@ legend('topright', legend = c('Bangladesh (adults)',
 mtext(text = 'B', side = 3, line = 1, adj = 0, cex=1.5)
 
 mycols = adjustcolor(RColorBrewer::brewer.pal(name = 'Set2',n = 4),.6)[c(1,4)]
-
-
 # AQ Vietnam data and Kenyan data overlaid without classification colors
 panels = c('','')
-plotting_dat = rbind(dat_Training, dat_kenya[, 1:2])
-study = c(rep(1, nrow(dat_Training)), rep(2, nrow(dat_kenya)))
-ind_rand = sample(1:nrow(plotting_dat), nrow(plotting_dat), replace = F)
 
 ## Just training data
 plot(dat_Training[,1],dat_Training[,2], 
      main='', xaxt='n',yaxt='n',pch=17, xlim = c(.9, 3.1),
      panel.first=grid(),
-     ylim = range(plotting_dat[,2]),
+     ylim = range(plotting_dat[,2], na.rm = T),
      col = mycols[1], xlab = '',ylab = '')
 mtext(text = axis_titles[1], side = 1, line = 3, 
       cex.lab=1.3, cex.axis=1.3,cex = 1.3)
@@ -208,7 +211,7 @@ for(qq in my_contours){
                 level = qq), lty=2,lwd=3,col='darkgreen')
 }
 
-# Training and testing data
+# Training and testing data - imputed and age corrected
 mycols = adjustcolor(RColorBrewer::brewer.pal(name = 'Set2',n = 4),.4)[c(1,4)]
 
 plot(plotting_dat[ind_rand,1],plotting_dat[ind_rand,2], 
@@ -220,8 +223,8 @@ mtext(text = axis_titles[1], side = 1, line = 3,
 mtext(text = axis_titles[2], side = 2, line = 3,
       las=3, cex.lab=1.3, cex.axis=1.3,cex = 1.3)
 
-points(dat_kenya[dat_kenya$HbAS==1, 1], 
-       dat_kenya[dat_kenya$HbAS==1, 2],
+points(dat_kenya$log10_platelet_imputed[dat_kenya$HbAS==1], 
+       dat_kenya$log10_wbc_imputed_corrected[dat_kenya$HbAS==1],
        col='black',pch=18)
 axis(side = 1, at = axis_points[[1]], 
      labels = 10^axis_points[[1]])
@@ -236,7 +239,10 @@ for(qq in my_contours){
   lines(ellipse(x = Model_sigma, centre = Model_mu, 
                 level = qq), lty=2,lwd=3,col='darkgreen')
   
-  lines(ellipse(x = cov(dat_kenya), centre = colMeans(dat_kenya), 
+  lines(ellipse(x = cov(dat_kenya[,c('log10_platelet_imputed',
+                                     'log10_wbc_imputed_corrected')]), 
+                centre = colMeans(dat_kenya[,c('log10_platelet_imputed',
+                                               'log10_wbc_imputed_corrected')]), 
                 level = qq), lty=2,lwd=3,col='purple')
 }
 legend('bottomright',inset = 0.02,cex=1.1, 
@@ -245,15 +251,17 @@ legend('bottomright',inset = 0.02,cex=1.1,
 
 
 par(mfrow=c(1,1),las=1)
-dat_feast$SM = as.numeric(dat_feast$hrp2>=1000)
-mod = mgcv::gam(SM ~ s(log(platelets)), family='binomial', data=dat_feast)
+dat_feast_hrp2$SM = as.numeric(dat_feast_hrp2$hrp2>=1000)
+mod = mgcv::gam(SM ~ s(log(platelets)), family='binomial', data=dat_feast_hrp2)
 summary(mod)
 xs = seq(1,3, length.out = 1000)
 ys=predict(mod, newdata = data.frame(platelets=10^xs), se.fit = T)
 uppers = inv.logit(ys$fit + 1.96*ys$se.fit)
 lowers = inv.logit(ys$fit - 1.96*ys$se.fit)
-plot(xs, inv.logit(ys$fit), ylim = c(0,1),main = 'Severely ill African children (FEAST)',
-     type='l', ylab='Probability PfHRP2>1000 ng/mL', panel.first=grid(),
+plot(xs, inv.logit(ys$fit), ylim = c(0,1),
+     main = 'Severely ill African children (FEAST)',
+     type='l', ylab='Probability PfHRP2>1000 ng/mL', 
+     panel.first=grid(),
      xlab='Platelet count', xaxt='n')
 axis(side = 1, at = axis_points[[1]], 
      labels = 10^axis_points[[1]])
@@ -262,15 +270,16 @@ axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))),
 polygon(c(xs, rev(xs)), c(uppers, rev(lowers)), border = NA, col = adjustcolor('grey', .2))
 
 
-dat_feast$parasites = as.numeric(dat_feast$parasitaemia>=10000)
+dat_feast_hrp2$parasites = as.numeric(dat_feast_hrp2$parasitaemia>=10000)
 mod = mgcv::gam(parasites ~ s(log(platelets)), 
-                family='binomial', data=dat_feast)
+                family='binomial', data=dat_feast_hrp2)
 summary(mod)
 xs = seq(1,3, length.out = 1000)
 ys=predict(mod, newdata = data.frame(platelets=10^xs), se.fit = T)
 uppers = inv.logit(ys$fit + 1.96*ys$se.fit)
 lowers = inv.logit(ys$fit - 1.96*ys$se.fit)
-plot(xs, inv.logit(ys$fit), ylim = c(0,1),main = 'Severely ill african children (FEAST)',
+plot(xs, inv.logit(ys$fit), ylim = c(0,1),
+     main = 'Severely ill african children (FEAST)',
      type='l', ylab='Probability >10,000 parasites/uL', panel.first=grid(),
      xlab='Platelet count', xaxt='n')
 axis(side = 1, at = axis_points[[1]], 
@@ -285,20 +294,26 @@ polygon(c(xs, rev(xs)), c(uppers, rev(lowers)), border = NA, col = adjustcolor('
 
 Full model
 ```{r}
+biomarker_vars = c('log10_platelet_imputed',
+                   'log10_wbc_imputed_corrected')
 contamination_model = stan_model(file = 'contamination_model.stan')
-dat_kenya$Ref_Model_Likelihood = dmvt(x = dat_kenya[, 1:2], 
+dat_kenya$Ref_Model_Likelihood = dmvt(x = dat_kenya[, biomarker_vars], 
                                       delta = Model_mu, 
                                       sigma = Model_sigma, 
                                       df = 7)
-hist(dat_kenya$Ref_Model_Likelihood, xlab='Likelihood under the reference model',main='')
+hist(dat_kenya$Ref_Model_Likelihood, 
+     xlab='Likelihood under the reference model',main='')
 threshold_100_percent = quantile(dat_kenya$Ref_Model_Likelihood,probs=0.8)
 
-ind=!is.na(dat_kenya$HbAS)
+ind = !is.na(dat_kenya$HbAS)
+
+# make a sub data set with available HbAS - which we sort by Likelihood value
 kemri_sickle_data = data.frame(sickle_trait=dat_kenya$HbAS[ind],
                                lik = dat_kenya$Ref_Model_Likelihood[ind])
 kemri_sickle_data = kemri_sickle_data[order(kemri_sickle_data$lik), ]
 N = nrow(kemri_sickle_data)
 
+# in the top quintile
 N2 = sum(kemri_sickle_data$lik>threshold_100_percent)
 print(N2)
 N2_sickle = sum(kemri_sickle_data$sickle_trait[(N-N2+1):N])
@@ -309,6 +324,8 @@ print(Nunknown)
 Nunknown_sickle = sum(kemri_sickle_data$sickle_trait[1:(N-N2)])
 print(Nunknown_sickle)
 
+
+# Run Bayesian mode
 out_mod=sampling(object = contamination_model, 
                  data = list(Nunknown = Nunknown, 
                              Nunknown_sickle = Nunknown_sickle, 
@@ -328,7 +345,6 @@ est_SM = 1-(quantile(thetas_contam$q * (N-N2),
 est_SM = round(100*est_SM)
 writeLines(sprintf('The proportion of individuals in the dataset with severe malaria is %s%% (95%% credible interval %s-%s)',
                    est_SM[3], est_SM[1], est_SM[5]))
-
 ```
 
 
@@ -353,15 +369,22 @@ hist(rbeta(10^5, prior_beta1, prior_beta2))
 
 Penalised max-likelihood
 ```{r student_model_allTrainingdata}
-Testing_data = dat_kenya[, 1:2] # age-corrected wbc
+Testing_data = dat_kenya[, biomarker_vars] # age-corrected wbc
 
+k_imputed_dataset = 1
 stan_data = list(D=2,
                  K_notSM=6,
-                 N_Training_Africa = nrow(feast_dat_training),
-                 N_Training_Asia = nrow(imputed_data_Viet[[1]])+nrow(core_SM),
+                 N_Training_Africa = nrow(dat_feast_training),
+                 N_Training_Asia = nrow(imputed_Vietam_minimal[[k_imputed_dataset]])+
+                   nrow(dat_core),
                  N_Testing = nrow(Testing_data),
-                 y_Training_Africa = feast_dat_training,
-                 y_Training_Asia = rbind(imputed_data_Viet[[1]][,biomarker_vars],core_SM),
+                 y_Training_Africa = dat_feast_training[,c("platelets_log10",
+                                                           "wbc_log10_corrected")],
+                 y_Training_Asia = rbind(imputed_Vietam_minimal[[1]][, c("platelets_log10",
+                                                                         "wbc_log10")],
+                                         dplyr::rename(dat_core[, c("platelets_log10",
+                                                      "log10_wbc_corrected")],
+                                                wbc_log10=log10_wbc_corrected)),
                  y_Testing = Testing_data,
                  mu_priorSM = mu_priorSM,
                  mu_prior_notSM = mu_prior_notSM,
@@ -413,9 +436,9 @@ dat_kenya$P_SMs = ps_post
 
 Save output
 ```{r}
-ws_dat = data.frame(IID = dat_kenya$IID,
+ws_dat = data.frame(#IID = dat_kenya$IID,
                     ws = ps_post)
-save(ws_dat, file = 'patient_SM_weights2.RData')
+save(ws_dat, file = 'patient_SM_weights.RData')
 ```
 
 
@@ -427,7 +450,6 @@ save(ws_dat, file = 'patient_SM_weights2.RData')
 Fit GAMS to likelihood values (quantiles of) with platelets/wbc/parasitaemia 
 
 ```{r sickle_mortality_model_validation, fig.height=8, fig.width=8}
-
 par(las=1, bty='n', family='serif', mfrow=c(2,2),cex.lab=1.5, cex.axis=1.5)
 
 hist(dat_kenya$P_SMs, breaks = 20, ylab = 'Number of patients',
@@ -509,32 +531,32 @@ mtext(text = 'D', side = 3, adj = 0, cex = 1.5)
 abline(h = 100*mean(dat_kenya$died, na.rm = T),
        lty=2, lwd=2)
 
-##******** BLOOD CULTURE + ****************
-par(mfrow=c(1,1))
-mod = gam(BCP ~ s(x,k=4), family='binomial', 
-          data=data.frame(x=myx, 
-                          BCP=dat_kenya$bloodculture_pos))
-summary(mod)
-preds = predict(mod, se.fit = T, newdata = data.frame(x=xs))
-ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
-           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
-plot(xs, 100*inv.logit(preds$fit),type='l',lwd=3,
-     xlim = c(0,1),ylim = range(c(0,ys)),
-     xlab='P(Severe malaria | Data)',
-     ylab='Blood culture positive (%)')
-polygon(c(xs, rev(xs)),ys, panel.first=grid(),
-        border = NA, col = adjustcolor('grey',.3))
-mtext(text = '', side = 3, adj = 0, cex = 1.5)
-abline(h = 100*mean(dat_kenya$bloodculture_pos),lty=2, lwd=2)
+# ##******** BLOOD CULTURE + ****************
+# par(mfrow=c(1,1))
+# mod = gam(BCP ~ s(x,k=4), family='binomial', 
+#           data=data.frame(x=myx, 
+#                           BCP=dat_kenya$bloodculture_pos))
+# summary(mod)
+# preds = predict(mod, se.fit = T, newdata = data.frame(x=xs))
+# ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+#            rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+# plot(xs, 100*inv.logit(preds$fit),type='l',lwd=3,
+#      xlim = c(0,1),ylim = range(c(0,ys)),
+#      xlab='P(Severe malaria | Data)',
+#      ylab='Blood culture positive (%)')
+# polygon(c(xs, rev(xs)),ys, panel.first=grid(),
+#         border = NA, col = adjustcolor('grey',.3))
+# mtext(text = '', side = 3, adj = 0, cex = 1.5)
+# abline(h = 100*mean(dat_kenya$bloodculture_pos),lty=2, lwd=2)
 ```
 
 
 
 Summarise the top and bottom 20th percentiles
 ```{r}
-upper_p = round(quantile(dat_kenya$P_SMs, probs=.8),1)
+upper_p = round(quantile(dat_kenya$P_SMs, probs=.8),3)
 print(upper_p)
-lower_p = round(quantile(dat_kenya$P_SMs, probs=.2),1)
+lower_p = round(quantile(dat_kenya$P_SMs, probs=.2),3)
 print(lower_p)
 top_ind = dat_kenya$P_SMs>upper_p
 bottom_ind = dat_kenya$P_SMs<lower_p

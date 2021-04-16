@@ -14,3 +14,8 @@ The work is broken down into a few RMarkdown scripts:
 Any questions contact me: jwatowatson at gmail dot com
 
 
+## Software packages needed
+
+To run the models you will need:
+* rstan
+* mgcv

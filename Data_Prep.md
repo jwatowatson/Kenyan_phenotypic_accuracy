@@ -8,17 +8,7 @@ output:
     keep_md: yes
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(cache = T, cache.comments = FALSE,
-                      echo = TRUE, include = TRUE,
-                      fig.width = 8, fig.height = 8,
-                      fig.pos = 'H',dev = 'png', dpi = 300)
-library(missForest)
-library(dplyr)
 
-# Variables that control Markdown run
-RE_RUN_IMPUTATION = F
-```
 
 
 
@@ -39,21 +29,52 @@ Data used to build the reference model of severe malaria:
 ## Kenyan dataset
 
 Load data
-```{r}
+
+```r
 load('../RData/kemri_case_data.RData')
 load('../RData/kemri_control_data.RData')
 
 kemri_case_data$sickle_trait = as.numeric(kemri_case_data$sickle==2)
 kemri_control_data$sickle_trait = as.numeric(kemri_control_data$sickle==2)
 writeLines('Distribution of the number of WT alleles (A) at rs_334 in the severe malaria cases:')
+```
+
+```
+## Distribution of the number of WT alleles (A) at rs_334 in the severe malaria cases:
+```
+
+```r
 table(kemri_case_data$sickle-1, useNA = 'ifany')
+```
+
+```
+## 
+##    0    1    2 <NA> 
+## 2145   57   11    7
+```
+
+```r
 writeLines('Distribution of the number of WT alleles (A) at rs_334 in the population controls:')
+```
+
+```
+## Distribution of the number of WT alleles (A) at rs_334 in the population controls:
+```
+
+```r
 table(kemri_control_data$sickle-1, useNA = 'ifany')
+```
+
+```
+## 
+##    0    1    2 
+## 3313  594   33
 ```
 
 
 Do imputation for missing variables
-```{r Missing_data_KEMRI}
+
+```r
 K_imputes = 10
 
 dat = kemri_case_data
@@ -69,7 +90,38 @@ dat$log10_creatinine[is.infinite(dat$log10_creatinine)] = NA
 dat = dat[, -which(colnames(dat)=='baseexc')]
 vars_interest = colnames(dat)
 writeLines('All available variables:')
+```
+
+```
+## All available variables:
+```
+
+```r
 print(colnames(dat))
+```
+
+```
+##  [1] "sample_code"            "pat_id"                 "source_code"           
+##  [4] "ethnic"                 "agemths"                "ageyr"                 
+##  [7] "sex"                    "died"                   "muac"                  
+## [10] "height"                 "weight"                 "bpd"                   
+## [13] "bps"                    "pul_hrate"              "crefill"               
+## [16] "tempaxil"               "oxysat"                 "prostration"           
+## [19] "severe_malaria_anaemia" "cerebral_malaria"       "respiratory_distress"  
+## [22] "parasite_gn"            "hb"                     "rbc"                   
+## [25] "hct"                    "mcv"                    "platelet"              
+## [28] "na"                     "k"                      "creat"                 
+## [31] "glucose"                "hco3"                   "g6pd_202"              
+## [34] "g6pd_376"               "thal"                   "sickle"                
+## [37] "wbc"                    "bcstot"                 "resp_rate"             
+## [40] "bcs_verbal"             "bcs_motor"              "bcs_eyes"              
+## [43] "convulsions"            "bcs_total"              "IID"                   
+## [46] "bloodculture_pos"       "bacteria"               "case_control"          
+## [49] "log_parasites"          "sickle_trait"           "BD"                    
+## [52] "log10_platelets"        "log10_wbc"              "log10_creatinine"
+```
+
+```r
 vars_interest = vars_interest[!vars_interest%in% 
                                 c('ageyr','IID','case_control','thal',
                                   'bacteria',"sample_code",
@@ -84,10 +136,60 @@ image(x = 1:nrow(dat), y = 1:length(vars_interest),
       Missing_data, yaxt='n',ylab='',xaxt='n', xlab='')
 axis(2, at = 1:length(vars_interest), 
      labels = tolower(vars_interest),cex=.7)
+```
 
+![](Data_Prep_files/figure-html/Missing_data_KEMRI-1.png)<!-- -->
+
+```r
 writeLines(sprintf('There is clinical data on %s individuals', nrow(dat)))
-apply(kemri_case_data, 2, function(x) mean(is.na(x)))
+```
 
+```
+## There is clinical data on 2220 individuals
+```
+
+```r
+apply(kemri_case_data, 2, function(x) mean(is.na(x)))
+```
+
+```
+##            sample_code                 pat_id            source_code 
+##            0.000000000            0.000000000            0.000000000 
+##                 ethnic                agemths                  ageyr 
+##            0.000000000            0.001351351            0.001351351 
+##                    sex                   died                   muac 
+##            0.000000000            0.005855856            0.274324324 
+##                 height                 weight                    bpd 
+##            0.259909910            0.013963964            0.530180180 
+##                    bps              pul_hrate                crefill 
+##            0.501801802            0.225225225            0.164864865 
+##               tempaxil                 oxysat            prostration 
+##            0.050450450            0.155855856            0.019819820 
+## severe_malaria_anaemia       cerebral_malaria   respiratory_distress 
+##            0.000000000            0.070270270            0.029729730 
+##            parasite_gn                     hb                    rbc 
+##            0.016216216            0.000000000            0.044594595 
+##                    hct                    mcv               platelet 
+##            0.050000000            0.046396396            0.177927928 
+##                     na                      k                  creat 
+##            0.150000000            0.150450450            0.232432432 
+##                glucose                   hco3                baseexc 
+##            0.268468468            0.245945946            0.222972973 
+##               g6pd_202               g6pd_376                   thal 
+##            0.000000000            0.005405405            0.045495495 
+##                 sickle                    wbc                 bcstot 
+##            0.003153153            0.002252252            0.070270270 
+##              resp_rate             bcs_verbal              bcs_motor 
+##            0.180630631            0.377027027            0.377027027 
+##               bcs_eyes            convulsions              bcs_total 
+##            0.377027027            0.558108108            0.377927928 
+##                    IID       bloodculture_pos               bacteria 
+##            0.025225225            0.000000000            0.964864865 
+##           case_control          log_parasites           sickle_trait 
+##            0.000000000            0.016216216            0.003153153
+```
+
+```r
 # redo this with platelets and wbc on log scale
 if(RE_RUN_IMPUTATION){
   set.seed(8758768)
@@ -120,7 +222,8 @@ if(RE_RUN_IMPUTATION){
 
 
 AQ study - impute missing data
-```{r Missing_data_AQVietnam}
+
+```r
 # Load the AQ Vietnam data
 aq_dat = readstata13::read.dta13('~/Dropbox/Datasets/AQ study/Vietnam AQ.DTA')
 aav_dat = read.csv('~/Dropbox/Datasets/AllMalariaDataBackUp/AAV_Vietnam/AAV.csv')
@@ -146,12 +249,28 @@ aav_dat_training = data.frame(platelets_log10 = log10(aav_dat$admplt/10^3),
 Vietnam_training = rbind(aq_dat_training, aav_dat_training)
 
 apply(Vietnam_training, 2, function(x) round(100*mean(is.na(x)),1))
+```
+
+```
+##    platelets_log10          wbc_log10 parasitaemia_log10                hct 
+##                7.2                4.1                0.0                0.0 
+##                age            outcome                gcs   creatinine_log10 
+##                0.0                0.0                0.0                0.5 
+##                sex 
+##                0.0
+```
+
+```r
 par(las=1, mar = c(2,9,2,2))
 image(x = 1:nrow(Vietnam_training), 
       y = 1:ncol(Vietnam_training), is.na(Vietnam_training),
       yaxt='n',ylab='',xaxt='n', xlab='')
 axis(2, at = 1:ncol(Vietnam_training), labels = tolower(colnames(Vietnam_training)),cex=.7)
+```
 
+![](Data_Prep_files/figure-html/Missing_data_AQVietnam-1.png)<!-- -->
+
+```r
 if(RE_RUN_IMPUTATION){
   set.seed(8758768)
   registerDoParallel(cores = 6)
@@ -184,22 +303,46 @@ save(imputed_Vietam_minimal, file = 'Inputs/imputed_Vietam_minimal.RData')
 writeLines(sprintf('We include a total of %s adults from Vietnam',nrow(Vietnam_training)))
 ```
 
+```
+## We include a total of 930 adults from Vietnam
+```
+
 
 MORU core malaria (severe patients only)
-```{r MORU core malaria}
+
+```r
 # Core Malaria - MORU: children with severe malaria
 # prepared using file extract_data.R in the hrp2 folder
 load(file = '../RData/Core_malaria_hrp2_platelets.RData')
 # filter out one super low platelet count (probably data entry mistake)
 dat_core = core_data[core_data$platelets>1, ]
 print(table(dat_core$country))
+```
+
+```
+## 
+## Bangladesh   Thailand 
+##        508        148
+```
+
+```r
 hist(dat_core$age, breaks = seq(0,80,by=5))
+```
+
+![](Data_Prep_files/figure-html/MORU core malaria-1.png)<!-- -->
+
+```r
 writeLines(sprintf('We include a total of %s patients from the Bangladesh and Thailand',nrow(dat_core)))
+```
+
+```
+## We include a total of 656 patients from the Bangladesh and Thailand
 ```
 
 
 FEAST
-```{r}
+
+```r
 load(file = '../RData/feast_platelet_white_count_data.RData')
 # select the patients with high HRP2 and parasite counts as training data for the reference model
 ind_feast_training = !is.na(dat_feast$platelets) & 
@@ -209,7 +352,13 @@ ind_feast_training = !is.na(dat_feast$platelets) &
   dat_feast$hrp2 > 1000 & dat_feast$parasitaemia > 1000 
 writeLines(sprintf('The diagnostic model training data includes a total of %s patients from the FEAST study',
                    sum(ind_feast_training)))
+```
 
+```
+## The diagnostic model training data includes a total of 121 patients from the FEAST study
+```
+
+```r
 ind_platelet_hrp2 = !is.na(dat_feast$platelets) &
   !is.na(dat_feast$hrp2)
 xx = dat_feast[ind_platelet_hrp2, c('platelets','hrp2','parasitaemia')]
@@ -219,14 +368,46 @@ writeLines(sprintf('We use a total of %s patients from the FEAST study to show t
                    sum(ind_platelet_hrp2)))
 ```
 
+```
+## We use a total of 567 patients from the FEAST study to show the relationship between PfHRP2 and platelet counts
+```
+
 
 We use the data from FEAST to estimate the age-related trend in white counts
-```{r age_model}
+
+```r
 # Age model of white counts
 wbc_age_model = mgcv::gam(formula = log10_wbc ~ s(age), 
                           data = data.frame(age=dat_feast$age,
                                             log10_wbc=log10(dat_feast$white_count)))
 summary(wbc_age_model)
+```
+
+```
+## 
+## Family: gaussian 
+## Link function: identity 
+## 
+## Formula:
+## log10_wbc ~ s(age)
+## 
+## Parametric coefficients:
+##             Estimate Std. Error t value Pr(>|t|)    
+## (Intercept) 1.108483   0.009394     118   <2e-16 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## Approximate significance of smooth terms:
+##          edf Ref.df     F  p-value    
+## s(age) 2.321  2.908 12.55 8.59e-08 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## R-sq.(adj) =  0.041   Deviance explained = 4.36%
+## GCV = 0.076018  Scale est. = 0.075724  n = 858
+```
+
+```r
 # save model for reproducibility
 save(wbc_age_model, file = 'Inputs/wbc_age_model')
 
@@ -236,8 +417,11 @@ plot((0:120)/12, predict(wbc_age_model, newdata=data.frame(age=0:120)),
      yaxt='n', ylim = range(log10(dat_feast$white_count),na.rm = T))
 axis(2, at = seq(0,2, by=0.5), labels = round(10^seq(0,2, by=0.5),1))
 points(jitter(dat_feast$age/12), log10(dat_feast$white_count), pch=20)
+```
 
+![](Data_Prep_files/figure-html/age_model-1.png)<!-- -->
 
+```r
 # estimate the expected baseline white count in severe disease in children older than 60 months
 baseline_log10_wbc = mean(log10(dat_feast$white_count[dat_feast$age>60]), 
                           na.rm = T)
@@ -260,6 +444,13 @@ dat_feast_training =
 # calculate an age-corrected white count for Core Malaria children
 ind = !is.na(dat_core$age)&dat_core$age<5
 sum(ind)
+```
+
+```
+## [1] 5
+```
+
+```r
 dat_core$log10_wbc = log10(dat_core$wbc)
 dat_core$platelets_log10 = log10(dat_core$platelets)
 dat_core$log10_wbc_corrected = log10(dat_core$wbc)
@@ -279,7 +470,8 @@ kemri_case_data$log10_wbc_imputed_corrected[ind] = kemri_case_data$log10_wbc_imp
 ## Compare platelet counts and white counts across datasets
 
 QQ plots comparing studies
-```{r qqplot_SM_studies_wbc}
+
+```r
 par(mfrow=c(2,2), las= 1, family='serif', cex.lab=1.5, cex.axis=1.5)
 qqplot(imputed_Vietam_minimal[[1]]$wbc_log10, # no crrection needed s all adults
        dat_feast_training$wbc_log10_corrected, 
@@ -323,8 +515,11 @@ axis(side = 2, at = log10(c(seq(1,10,by=1), seq(10,100,by=10))),
 lines(0:5, 0:5)
 ```
 
+![](Data_Prep_files/figure-html/qqplot_SM_studies_wbc-1.png)<!-- -->
 
-```{r qqplot_SM_studies_platelets}
+
+
+```r
 #************* Platelets ***************
 par(mfrow=c(2,2), las= 1, family='serif', cex.lab=1.5, cex.axis=1.5)
 
@@ -372,8 +567,11 @@ axis(side = 2, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))),
 lines(0:5, 0:5)
 ```
 
+![](Data_Prep_files/figure-html/qqplot_SM_studies_platelets-1.png)<!-- -->
+
 QQ plots looking at marginal normality
-```{r qq_normality, fig.height=6, fig.width=10}
+
+```r
 k=1
 dat_Training = rbind(imputed_Vietam_minimal[[k]][, c('platelets_log10', 'wbc_log10')],
                       rename(dat_feast_training[, c('platelets_log10', 'wbc_log10_corrected')],
@@ -381,8 +579,21 @@ dat_Training = rbind(imputed_Vietam_minimal[[k]][, c('platelets_log10', 'wbc_log
                       rename(dat_core[, c('platelets_log10', 'log10_wbc_corrected')],
                              wbc_log10=log10_wbc_corrected))
 writeLines('Dimensions of training dataset:')
-print(dim(dat_Training))
+```
 
+```
+## Dimensions of training dataset:
+```
+
+```r
+print(dim(dat_Training))
+```
+
+```
+## [1] 1707    2
+```
+
+```r
 par(las=1, bty='n', mfrow=c(1,2), family='serif', 
     cex.lab=1.5, cex.axis=1.5)
 qqnorm(scale(dat_Training$platelets_log10), pch=20, 
@@ -393,10 +604,13 @@ qqnorm(scale(dat_Training$wbc_log10), pch=20,
 lines(-10:10, -10:10, lwd=2, lty=2)
 ```
 
+![](Data_Prep_files/figure-html/qq_normality-1.png)<!-- -->
+
 
 
 Make curated dataset
-```{r}
+
+```r
 dat_kenya = kemri_case_data[ , c('agemths',
                                  'platelet', # observed platelets
                                  'wbc',      # observed white counts
@@ -407,8 +621,29 @@ dat_kenya = kemri_case_data[ , c('agemths',
 dat_kenya$HbAS = kemri_case_data$sickle_trait
 
 dim(dat_kenya)
+```
+
+```
+## [1] 2220    8
+```
+
+```r
 dim(dat_Training)
+```
+
+```
+## [1] 1707    2
+```
+
+```r
 dim(dat_feast_training)
+```
+
+```
+## [1] 121   3
+```
+
+```r
 save(dat_kenya, dat_Training, dat_feast_training, dat_core, 
      file = 'Inputs/curated_modelling_dataset.RData')
 ```
