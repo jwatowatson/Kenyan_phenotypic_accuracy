@@ -7,6 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(mgcv)
+library(gtools)
 ```
 
 ## Load data
@@ -15,5 +17,192 @@ XXX **This needs data not included in the git release to be run** XXX
 
 ```{r}
 load('../RData/kemri_case_data.RData')
+load('Outputs/Kenya_dat_PSM.RData')
+dat_kenya = cbind(kemri_case_data, dat_kenya)
 ```
 
+## Summaries
+
+Summarise the top and bottom 20th percentiles
+```{r}
+upper_p = round(quantile(dat_kenya$P_SMs, probs=.8),3)
+print(upper_p)
+lower_p = round(quantile(dat_kenya$P_SMs, probs=.2),3)
+print(lower_p)
+top_ind = dat_kenya$P_SMs>upper_p
+bottom_ind = dat_kenya$P_SMs<lower_p
+
+sum(top_ind)
+sum(bottom_ind)
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% have sickle trait versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$HbAS[top_ind],na.rm = T),1),
+                   round(100*mean(dat_kenya$HbAS[bottom_ind],na.rm = T),1),
+                   lower_p))
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% died versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$died[top_ind],na.rm = T),1),
+                   round(100*mean(dat_kenya$died[bottom_ind],na.rm = T),1),
+                   lower_p))
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% were blood culture + versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$bloodculture_pos[top_ind],na.rm = T),1),
+                   round(100*mean(dat_kenya$bloodculture_pos[bottom_ind],na.rm = T),1),
+                   lower_p))
+
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% has Hb<5 versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$severe_malaria_anaemia[top_ind],na.rm = T),1),
+                   round(100*mean(dat_kenya$severe_malaria_anaemia[bottom_ind],na.rm = T),1),
+                   lower_p))
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% had fewer than 1,000 parasites per uL versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$log_parasites[top_ind]<3,na.rm = T),1),
+                   round(100*mean(dat_kenya$log_parasites[bottom_ind]<3,na.rm = T),1),
+                   lower_p))
+
+writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% had more than 100,000 parasites per uL versus %s%% for patients with P(SM|Data)< %s',
+                   upper_p,
+                   round(100*mean(dat_kenya$log_parasites[top_ind]>5,na.rm = T),1),
+                   round(100*mean(dat_kenya$log_parasites[bottom_ind]>5,na.rm = T),1),
+                   lower_p))
+```
+
+
+
+
+
+## Some extra bits
+
+
+```{r P_SM_bloodculture}
+myx = dat_kenya$P_SMs
+xs = seq(0,1,length.out = 100)[-1]
+##******** BLOOD CULTURE + ****************
+par(mfrow=c(1,1))
+mod = gam(BCP ~ s(x,k=4), family='binomial',
+          data=data.frame(x=myx,
+                          BCP=dat_kenya$bloodculture_pos))
+
+summary(mod)
+preds = predict(mod, se.fit = T, newdata = data.frame(x=xs))
+ys = 100*c(inv.logit(preds$fit+1.96*preds$se.fit),
+           rev(inv.logit(preds$fit-1.96*preds$se.fit)))
+plot(xs, 100*inv.logit(preds$fit),type='l',lwd=3,
+     xlim = c(0,1),ylim = range(c(0,ys)),
+     xlab='P(Severe malaria | Data)',
+     ylab='Blood culture positive (%)')
+polygon(c(xs, rev(xs)),ys, panel.first=grid(),
+        border = NA, col = adjustcolor('grey',.3))
+mtext(text = '', side = 3, adj = 0, cex = 1.5)
+abline(h = 100*mean(dat_kenya$bloodculture_pos),lty=2, lwd=2)
+```
+
+
+
+Explore anaemia a bit more
+```{r haemoglobin_SM}
+par(mfrow=c(2,2), las=1, bty='n')
+layout(mat = matrix(data = c(1,1,2,3),nrow = 2, byrow = T))
+plot(dat_kenya$P_SMs, dat_kenya$hb, 
+     xlim=c(0,1),panel.first=grid(),
+     pch=20, xlab='P(Severe malaria | Data)',ylab='Haemoglobin (g/dL)')
+abline(h=5,v=c(upper_p, lower_p), lty=2,lwd=3, col='red')
+
+hist(dat_kenya$hb[bottom_ind], xlim=c(0,15),
+     breaks = 0:19, main = paste('P(Severe malaria | Data)',lower_p,sep='<'), 
+     xlab='Hb (g/dL)')
+abline(v=5, lty=2,lwd=3, col='red')
+hist(dat_kenya$hb[top_ind], xlim=c(0,15),
+     breaks = 0:19, main = paste('P(Severe malaria | Data)',upper_p,sep='>'), 
+     xlab='Hb (g/dL)')
+abline(v=5, lty=2,lwd=3, col='red')
+```
+
+
+
+
+
+
+```{r double_mutants, fig.height=8, fig.width=8}
+f=colorRampPalette(colors = RColorBrewer::brewer.pal(name = 'RdYlBu',n = 11))
+n_levels = 11
+mycuts = cut(x = dat_kenya$P_SMs, breaks = seq(0,1,by=1/n_levels))
+cols_ind = as.numeric(mycuts)
+mycols = f(n_levels)
+
+par(las=1, mfrow=c(1,1), bty='n', family='serif', 
+    cex.lab=1.5, cex.axis=1.5, mar = c(5,6,2,2))
+my_fade = 0.6
+
+## Sickle trait and thal homozygous
+plot(log10(dat_kenya$platelet), log10(dat_kenya$wbc),
+     xaxt='n', yaxt='n', xlab='',
+     ylab='', pch=16, 
+     col = adjustcolor(mycols[cols_ind], my_fade))
+mtext(side = 2, text = 'White count (x1000 per uL)', 
+      cex=1.5, line = 3, las = 3)
+mtext(side = 1, text = 'Platelet count (x1000 per uL)', 
+      cex=1.5, line = 3)
+axis(side = 1, at = 1:3, labels = 10^(1:3))
+axis(side = 2, at = 0:2, labels = 10^(0:2))
+axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))), 
+     tick = T, labels = F)
+axis(side = 2, at = log10(c(seq(1,10,by=1), seq(10,100,by=10))), 
+     tick = T, labels = F)
+ind_double = dat_kenya$HbAS==1 & dat_kenya$thal==3
+ind_single = dat_kenya$HbAS==1 & dat_kenya$thal<3
+
+points(log10(dat_kenya$platelet[ind_double]),
+       log10(dat_kenya$wbc[ind_double]),
+       col='black',pch=18,cex=1.8)
+legend('bottomright', pch = 18, col = c('black'),
+       inset = 0, cex=1.3,bty='n',
+       legend = c('HbAS & HZ-alpha-thal'))
+lgd_ = rep(NA, n_levels)
+lgd_[c(1,6,11)] = c(0,0.5,1)
+legend('topleft',
+       legend = lgd_,
+       fill = mycols,bty='n',x.intersp =.5,
+       border = NA,inset = 0.03,
+       y.intersp = 0.5,title = 'P(SM | Data)\n',
+       cex = 1, text.font = 1)
+
+
+
+## Bacteremia
+plot(log10(dat_kenya$platelet), log10(dat_kenya$wbc),
+     xaxt='n', yaxt='n', xlab='',pch=16, ylab='', 
+     col = adjustcolor(mycols[cols_ind], my_fade))
+axis(side = 1, at = 1:3, labels = 10^(1:3))
+axis(side = 2, at = 0:2, labels = 10^(0:2))
+axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))), 
+     tick = T, labels = F)
+axis(side = 2, at = log10(c(seq(1,10,by=1), seq(10,100,by=10))), 
+     tick = T, labels = F)
+mtext(side = 2, text = 'White count (x1000 per uL)', 
+      cex=1.5, line = 3, las = 3)
+mtext(side = 1, text = 'Platelet count (x1000 per uL)', 
+      cex=1.5, line = 3)
+ind_blood_cult = dat_kenya$bloodculture_pos==1
+
+points(log10(dat_kenya$platelet[ind_blood_cult]),
+       log10(dat_kenya$wbc[ind_blood_cult]),
+       col='black',pch=18,cex=1.5)
+
+ind_salmonella = grep(pattern = 'salmonella', 
+                      x = dat_kenya$bacteria,ignore.case = T)
+points(log10(dat_kenya$platelet[ind_salmonella]),
+       log10(dat_kenya$wbc[ind_salmonella]),
+       col='black',pch=1,cex=1.5)
+
+legend('bottomright', pch = c(18,1), col = c('black'),
+       inset = 0, cex=1.3, bty='n',
+       legend = c('Bacteremia','NTS'))
+
+```

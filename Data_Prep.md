@@ -316,13 +316,15 @@ MORU core malaria (severe patients only)
 load(file = '../RData/Core_malaria_hrp2_platelets.RData')
 # filter out one super low platelet count (probably data entry mistake)
 dat_core = core_data[core_data$platelets>1, ]
+dat_core = core_data[core_data$platelets<450, ]
+
 print(table(dat_core$country))
 ```
 
 ```
 ## 
 ## Bangladesh   Thailand 
-##        508        148
+##        508        145
 ```
 
 ```r
@@ -336,7 +338,7 @@ writeLines(sprintf('We include a total of %s patients from the Bangladesh and Th
 ```
 
 ```
-## We include a total of 656 patients from the Bangladesh and Thailand
+## We include a total of 653 patients from the Bangladesh and Thailand
 ```
 
 
@@ -590,7 +592,7 @@ print(dim(dat_Training))
 ```
 
 ```
-## [1] 1707    2
+## [1] 1704    2
 ```
 
 ```r
@@ -632,7 +634,23 @@ dim(dat_Training)
 ```
 
 ```
-## [1] 1707    2
+## [1] 1704    2
+```
+
+```r
+dim(dat_core)
+```
+
+```
+## [1] 653   9
+```
+
+```r
+nrow(Vietnam_training) + nrow(dat_core)
+```
+
+```
+## [1] 1583
 ```
 
 ```r

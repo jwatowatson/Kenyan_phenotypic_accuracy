@@ -2,8 +2,14 @@
 title: "Severe malaria in Kenya - improving phenotypic accuracy"
 author: "James Watson"
 date: "30/09/2020"
-output: html_document
+output: 
+  html_document: 
+    keep_md: yes
 ---
+
+
+
+XXXXX**This code wont work without access to the genetic data - needs permission from data sharing committee**XXXXXXXXXXX
 
 
 ```{r setup, include=FALSE}
@@ -16,11 +22,11 @@ knitr::opts_chunk$set(cache = TRUE, cache.comments = FALSE,
 library(gtools)
 load('../RData/kemri_case_data.RData')
 load('../RData/kemri_control_data.RData')
-load('patient_SM_weights2.RData')
+load('Outputs/patient_SM_weights.RData')
 kemri_case_data$P_SM = (ws_dat$ws)
 ndila_dat = readstata13::read.dta13('../Data/KEMRI/severe malaria dataset_Ndila et al (2018).dta')
 
-source('functions.R')
+#source('functions.R')
 library(rstan)
 options(mc.cores = parallel::detectCores())
 ```
@@ -164,8 +170,6 @@ sort(-log10(pval_difference))
 
 Run the model of rs1050828 but the genotypes coded categorically
 ```{r Fig6_differential_effects, fig.width=10, fig.height=10}
-
-
 gene_names = gene_cols#= gsub(pattern = '_',replacement = '\n',x = gene_cols)
 gene_names = gsub(pattern = '_F',replacement = '',x = gene_names)
 gene_names = gsub(pattern = '_M',replacement = '',x = gene_names)
