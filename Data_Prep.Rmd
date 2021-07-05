@@ -272,7 +272,7 @@ dat_core$log10_wbc_corrected[ind] = dat_core$log10_wbc[ind]-
 ind = !is.na(kemri_case_data$agemths) & kemri_case_data$agemths<60
 # extract an imputed wbc set
 kemri_case_data$log10_wbc_imputed = imputed_data_KEMRI[[1]]$log10_wbc
-kemri_case_data$log10_platelet_imputed = imputed_data_KEMRI[[1]]$log10_platelets
+kemri_case_data$log10_platelet_imputed = imputed_data_KEMRI[[1]]$log10_platelet
 kemri_case_data$log10_wbc_imputed_corrected = kemri_case_data$log10_wbc_imputed
 kemri_case_data$log10_wbc_imputed_corrected[ind] = kemri_case_data$log10_wbc_imputed[ind]-
   (predict(wbc_age_model, newdata=data.frame(age=kemri_case_data$agemths[ind]))-baseline_log10_wbc)
@@ -378,10 +378,10 @@ QQ plots looking at marginal normality
 ```{r qq_normality, fig.height=6, fig.width=10}
 k=1
 dat_Training = rbind(imputed_Vietam_minimal[[k]][, c('platelets_log10', 'wbc_log10')],
-                      rename(dat_feast_training[, c('platelets_log10', 'wbc_log10_corrected')],
-                             wbc_log10=wbc_log10_corrected),
-                      rename(dat_core[, c('platelets_log10', 'log10_wbc_corrected')],
-                             wbc_log10=log10_wbc_corrected))
+                     rename(dat_feast_training[, c('platelets_log10', 'wbc_log10_corrected')],
+                            wbc_log10=wbc_log10_corrected),
+                     rename(dat_core[, c('platelets_log10', 'log10_wbc_corrected')],
+                            wbc_log10=log10_wbc_corrected))
 writeLines('Dimensions of training dataset:')
 print(dim(dat_Training))
 
@@ -405,6 +405,7 @@ dat_kenya = kemri_case_data[ , c('agemths',
                                  'log10_platelet_imputed', # imputed white counts (log10 scale)
                                  'log10_wbc_imputed', # imputed white counts (log10 scale)
                                  'log10_wbc_imputed_corrected',
+                                 'log_parasites', # observed parasite count
                                  'died')]  #with age correction
 dat_kenya$HbAS = kemri_case_data$sickle_trait
 
@@ -416,4 +417,62 @@ dim(dat_feast_training)
 save(dat_kenya, dat_Training, dat_feast_training, dat_core, 
      file = 'Inputs/curated_modelling_dataset.RData')
 ```
+
+
+# Make shareable data for KWTRP Dataverse 
+
+Data:
+
+* Platelet counts (Asian studies/Kenya/FEAST) 
+* White counts (Asian studies/Kenya/FEAST) 
+* PfHRP2 (Asian studies/FEAST) 
+* Age (Asian studies/Kenya/FEAST)
+* HbAS versus not HbAS (Kenya only)
+* In-hospital mortality (Kenya only)
+
+
+```{r}
+kemri_case_data$agemths[kemri_case_data$sample_code=='KK0681-C']=8
+dat = data.frame(study = c(rep('Vietnam', nrow(Vietnam_training)),
+                           rep('Bangladesh/Thailand', nrow(core_data)),
+                           rep('Kenya', nrow(kemri_case_data)),
+                           rep('FEAST', sum(ind_platelet_hrp2))),
+                 platelets = c(10^Vietnam_training$platelets_log10,
+                               core_data$platelets,
+                               kemri_case_data$platelet,
+                               dat_feast$platelets[ind_platelet_hrp2]),
+                 wbc = c(10^Vietnam_training$wbc_log10,
+                         core_data$wbc,
+                         round(kemri_case_data$wbc,1),
+                         round(dat_feast$white_count[ind_platelet_hrp2],2)),
+                 pfhrp2 = c(rep(NA, nrow(Vietnam_training)),
+                            core_data$hrp2,
+                            rep(NA, nrow(kemri_case_data)),
+                            dat_feast$hrp2[ind_platelet_hrp2]),
+                 age = c(Vietnam_training$age,
+                         core_data$age,
+                         kemri_case_data$agemths/12,
+                         dat_feast$age[ind_platelet_hrp2]/12),
+                 HbAS = c(rep(NA, nrow(Vietnam_training)+nrow(core_data)),
+                          kemri_case_data$sickle_trait,
+                          rep(NA, sum(ind_platelet_hrp2))),
+                 outcome = c(Vietnam_training$outcome,
+                             core_data$outcome,
+                             kemri_case_data$died,
+                             dat_feast$outcome[ind_platelet_hrp2]),
+                 parasitaemia = c(10^Vietnam_training$parasitaemia_log10,
+                                        core_data$paraul,
+                                        kemri_case_data$parasite_gn,
+                                        dat_feast$parasitaemia[ind_platelet_hrp2]))
+
+write.csv(dat, file = 'Inputs/KWTRP_Dataverse_dataset.csv',row.names = F)
+aggregate(outcome ~ study, dat, mean)
+aggregate(HbAS ~ study, dat, mean)
+aggregate(platelets ~ study, dat, median)
+aggregate(wbc ~ study, dat, median)
+aggregate(age ~ study, dat, quantile)
+aggregate(parasitaemia ~ study, dat, quantile)
+```
+
+
 

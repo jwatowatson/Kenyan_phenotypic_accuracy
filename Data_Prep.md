@@ -400,8 +400,8 @@ summary(wbc_age_model)
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
 ## Approximate significance of smooth terms:
-##          edf Ref.df     F  p-value    
-## s(age) 2.321  2.908 12.55 8.59e-08 ***
+##          edf Ref.df     F p-value    
+## s(age) 2.321  2.908 12.55  <2e-16 ***
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
@@ -463,7 +463,7 @@ dat_core$log10_wbc_corrected[ind] = dat_core$log10_wbc[ind]-
 ind = !is.na(kemri_case_data$agemths) & kemri_case_data$agemths<60
 # extract an imputed wbc set
 kemri_case_data$log10_wbc_imputed = imputed_data_KEMRI[[1]]$log10_wbc
-kemri_case_data$log10_platelet_imputed = imputed_data_KEMRI[[1]]$log10_platelets
+kemri_case_data$log10_platelet_imputed = imputed_data_KEMRI[[1]]$log10_platelet
 kemri_case_data$log10_wbc_imputed_corrected = kemri_case_data$log10_wbc_imputed
 kemri_case_data$log10_wbc_imputed_corrected[ind] = kemri_case_data$log10_wbc_imputed[ind]-
   (predict(wbc_age_model, newdata=data.frame(age=kemri_case_data$agemths[ind]))-baseline_log10_wbc)
@@ -576,10 +576,10 @@ QQ plots looking at marginal normality
 ```r
 k=1
 dat_Training = rbind(imputed_Vietam_minimal[[k]][, c('platelets_log10', 'wbc_log10')],
-                      rename(dat_feast_training[, c('platelets_log10', 'wbc_log10_corrected')],
-                             wbc_log10=wbc_log10_corrected),
-                      rename(dat_core[, c('platelets_log10', 'log10_wbc_corrected')],
-                             wbc_log10=log10_wbc_corrected))
+                     rename(dat_feast_training[, c('platelets_log10', 'wbc_log10_corrected')],
+                            wbc_log10=wbc_log10_corrected),
+                     rename(dat_core[, c('platelets_log10', 'log10_wbc_corrected')],
+                            wbc_log10=log10_wbc_corrected))
 writeLines('Dimensions of training dataset:')
 ```
 
@@ -619,6 +619,7 @@ dat_kenya = kemri_case_data[ , c('agemths',
                                  'log10_platelet_imputed', # imputed white counts (log10 scale)
                                  'log10_wbc_imputed', # imputed white counts (log10 scale)
                                  'log10_wbc_imputed_corrected',
+                                 'log_parasites', # observed parasite count
                                  'died')]  #with age correction
 dat_kenya$HbAS = kemri_case_data$sickle_trait
 
@@ -626,7 +627,7 @@ dim(dat_kenya)
 ```
 
 ```
-## [1] 2220    8
+## [1] 2220    9
 ```
 
 ```r
@@ -642,7 +643,7 @@ dim(dat_core)
 ```
 
 ```
-## [1] 653   9
+## [1] 653  11
 ```
 
 ```r
@@ -665,4 +666,128 @@ dim(dat_feast_training)
 save(dat_kenya, dat_Training, dat_feast_training, dat_core, 
      file = 'Inputs/curated_modelling_dataset.RData')
 ```
+
+
+# Make shareable data for KWTRP Dataverse 
+
+Data:
+
+* Platelet counts (Asian studies/Kenya/FEAST) 
+* White counts (Asian studies/Kenya/FEAST) 
+* PfHRP2 (Asian studies/FEAST) 
+* Age (Asian studies/Kenya/FEAST)
+* HbAS versus not HbAS (Kenya only)
+* In-hospital mortality (Kenya only)
+
+
+
+```r
+kemri_case_data$agemths[kemri_case_data$sample_code=='KK0681-C']=8
+dat = data.frame(study = c(rep('Vietnam', nrow(Vietnam_training)),
+                           rep('Bangladesh/Thailand', nrow(core_data)),
+                           rep('Kenya', nrow(kemri_case_data)),
+                           rep('FEAST', sum(ind_platelet_hrp2))),
+                 platelets = c(10^Vietnam_training$platelets_log10,
+                               core_data$platelets,
+                               kemri_case_data$platelet,
+                               dat_feast$platelets[ind_platelet_hrp2]),
+                 wbc = c(10^Vietnam_training$wbc_log10,
+                         core_data$wbc,
+                         round(kemri_case_data$wbc,1),
+                         round(dat_feast$white_count[ind_platelet_hrp2],2)),
+                 pfhrp2 = c(rep(NA, nrow(Vietnam_training)),
+                            core_data$hrp2,
+                            rep(NA, nrow(kemri_case_data)),
+                            dat_feast$hrp2[ind_platelet_hrp2]),
+                 age = c(Vietnam_training$age,
+                         core_data$age,
+                         kemri_case_data$agemths/12,
+                         dat_feast$age[ind_platelet_hrp2]/12),
+                 HbAS = c(rep(NA, nrow(Vietnam_training)+nrow(core_data)),
+                          kemri_case_data$sickle_trait,
+                          rep(NA, sum(ind_platelet_hrp2))),
+                 outcome = c(Vietnam_training$outcome,
+                             core_data$outcome,
+                             kemri_case_data$died,
+                             dat_feast$outcome[ind_platelet_hrp2]),
+                 parasitaemia = c(10^Vietnam_training$parasitaemia_log10,
+                                        core_data$paraul,
+                                        kemri_case_data$parasite_gn,
+                                        dat_feast$parasitaemia[ind_platelet_hrp2]))
+
+write.csv(dat, file = 'Inputs/KWTRP_Dataverse_dataset.csv',row.names = F)
+aggregate(outcome ~ study, dat, mean)
+```
+
+```
+##                 study   outcome
+## 1 Bangladesh/Thailand 0.1816794
+## 2               FEAST 0.1128748
+## 3               Kenya 0.1159946
+## 4             Vietnam 0.1290323
+```
+
+```r
+aggregate(HbAS ~ study, dat, mean)
+```
+
+```
+##   study       HbAS
+## 1 Kenya 0.02575689
+```
+
+```r
+aggregate(platelets ~ study, dat, median)
+```
+
+```
+##                 study platelets
+## 1 Bangladesh/Thailand        56
+## 2               FEAST       166
+## 3               Kenya       113
+## 4             Vietnam        56
+```
+
+```r
+aggregate(wbc ~ study, dat, median)
+```
+
+```
+##                 study  wbc
+## 1 Bangladesh/Thailand  7.9
+## 2               FEAST 11.9
+## 3               Kenya 13.2
+## 4             Vietnam  8.5
+```
+
+```r
+aggregate(age ~ study, dat, quantile)
+```
+
+```
+##                 study     age.0%    age.25%    age.50%    age.75%   age.100%
+## 1 Bangladesh/Thailand  2.0000000 20.0000000 28.0000000 43.0000000 80.0000000
+## 2               FEAST  0.1666667  1.1666667  2.0833333  3.3333333 12.0000000
+## 3               Kenya  0.1666667  1.2500000  2.3333333  3.5833333 13.0000000
+## 4             Vietnam 15.0000000 23.0000000 30.0000000 42.0000000 79.0000000
+```
+
+```r
+aggregate(parasitaemia ~ study, dat, quantile)
+```
+
+```
+##                 study parasitaemia.0% parasitaemia.25% parasitaemia.50%
+## 1 Bangladesh/Thailand           32.00          8289.00         48984.00
+## 2               FEAST            0.00             0.00           400.00
+## 3               Kenya           11.00          6208.75         72000.00
+## 4             Vietnam           20.00         13047.00         83084.50
+##   parasitaemia.75% parasitaemia.100%
+## 1        187395.20        5100000.00
+## 2         53200.00        2313120.00
+## 3        315250.00        2684000.00
+## 4        316512.00        3692640.00
+```
+
+
 

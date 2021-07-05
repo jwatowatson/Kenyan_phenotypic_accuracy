@@ -254,7 +254,7 @@ print(dim(dat_Training))
 mycols = adjustcolor(RColorBrewer::brewer.pal(name = 'Set2',n = 4),.3)[c(1,4)]
 # AQ Vietnam data and Kenyan data overlaid
 par(las=1,mfrow=c(1,2),bty='n', family='serif', 
-    cex.lab=1.3, cex.axis=1.3, mar = c(5,7,4,2))
+    cex.lab=1.3, cex.axis=1.3, mar = c(5,5,4,2))
 axis_titles = c('Platelet count (x1000 per uL)',
                 'White count (x1000 per uL)')
 axis_points = list(1:3, 0:2)
@@ -310,14 +310,17 @@ dat_feast_hrp2$hrp2[dat_feast_hrp2$hrp2<=1]= 10^rnorm(sum(dat_feast_hrp2$hrp2<=1
 ind = !is.na(dat_core$hrp2) & dat_core$hrp2>0
 mycoefs= coef(MASS::rlm(log10(dat_core$hrp2[ind])~ log10(dat_core$platelets[ind])))
 
-mycols = c(brewer.pal(n = 9, 'Set1')[c(3,1)], 'black')
+mycols = c(brewer.pal(n = 8, 'Dark2')[c(1,2)], 'black')
 plot(log10(dat_core$platelets), 
-     log10(dat_core$hrp2), xlim = c(.9, 3),panel.first = grid(),
-     xlab='Platelet count (x1000) per uL', ylab='', xaxt='n', yaxt='n',
-     ylim =c(-.1, 5), pch = 16, col=mycols[1], cex=1.2)
+     log10(dat_core$hrp2), xlim = c(.8, 3),
+     panel.first = grid(),
+     xlab='Platelet count (x1000) per uL',
+     ylab='', xaxt='n', yaxt='n',
+     ylim =c(-.1, 5), pch = 16, 
+     col=adjustcolor(mycols[1], .6), cex=1.2)
 mtext(text = 'PfHRP2 (ng/mL)', side = 2, line = 4, las = 3, cex=1.3)
 
-axis(2, at = 0:5, labels = 10^(0:5))
+axis(2, at = 0:5, labels = c(1,10,expression(10^2),expression(10^3),                              expression(10^4),expression(10^5)))
 axis(side = 1, at = axis_points[[1]], 
      labels = 10^axis_points[[1]])
 axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))), 
@@ -327,19 +330,22 @@ axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))),
 dat_feast_hrp2$type=2
 ind_0parasite = which(!is.na(dat_feast_hrp2$hrp2) & dat_feast_hrp2$parasitaemia==0)
 dat_feast_hrp2$type[ind_0parasite] = 3
-points(log10(dat_feast_hrp2$platelets), log10(dat_feast_hrp2$hrp2),
+points(log10(dat_feast_hrp2$platelets),
+       log10(dat_feast_hrp2$hrp2),
        pch=c(15,17)[(dat_feast_hrp2$type-1)], 
-       col= adjustcolor(mycols[dat_feast_hrp2$type], .6), cex=1.2)
+       col=adjustcolor(mycols[dat_feast_hrp2$type], .5),
+       cex=1.2)
 
 ind_spline = !is.na(dat_feast_hrp2$platelets) & dat_feast_hrp2$platelets>10
 f=smooth.spline(y = log10(dat_feast_hrp2$hrp2[ind_spline]),
                 x = log10(dat_feast_hrp2$platelets[ind_spline]))
-lines(f, lwd=4, col='grey',lty=1)
-lines(0:10, mycoefs[1]+mycoefs[2]*(0:10), lwd=4, col=mycols[1],lty=1)
+lines(f, lwd=4, col='brown',lty=1)
+lines(0:10, mycoefs[1]+mycoefs[2]*(0:10), lwd=3,
+      col=mycols[1],lty=2)
 legend('topright', legend = c('Bangladesh (adults)', 
                               'FEAST (+blood slide)', 
                               'FEAST (-blood slide)'), 
-       col = c(mycols), pch=c(16,15,17), cex=.9)
+       col = adjustcolor(c(mycols,'black'),.6), pch=c(16,15,17), cex=.9)
 mtext(text = 'B', side = 3, line = 1, adj = 0, cex=1.5)
 ```
 
@@ -424,7 +430,7 @@ for(qq in my_contours){
 
 ```r
 # Training and testing data - imputed and age corrected
-mycols = adjustcolor(RColorBrewer::brewer.pal(name = 'Set2',n = 4),.4)[c(1,4)]
+mycols = adjustcolor(RColorBrewer::brewer.pal(name = 'Set2',n = 4),.6)[c(1,4)]
 
 plot(plotting_dat[ind_rand,1],plotting_dat[ind_rand,2], 
      main='', xaxt='n',yaxt='n',pch=c(17,15)[study[ind_rand]], 
@@ -435,9 +441,9 @@ mtext(text = axis_titles[1], side = 1, line = 3,
 mtext(text = axis_titles[2], side = 2, line = 3,
       las=3, cex.lab=1.3, cex.axis=1.3,cex = 1.3)
 
-points(dat_kenya$log10_platelet_imputed[dat_kenya$HbAS==1], 
-       dat_kenya$log10_wbc_imputed_corrected[dat_kenya$HbAS==1],
-       col='black',pch=18)
+# points(dat_kenya$log10_platelet_imputed[dat_kenya$HbAS==1], 
+#        dat_kenya$log10_wbc_imputed_corrected[dat_kenya$HbAS==1],
+#        col='black',pch=18)
 axis(side = 1, at = axis_points[[1]], 
      labels = 10^axis_points[[1]])
 axis(side = 2, at = axis_points[[2]], 
@@ -458,8 +464,8 @@ for(qq in my_contours){
                 level = qq), lty=2,lwd=3,col='purple')
 }
 legend('bottomright',inset = 0.02,cex=1.1, 
-       legend = c('Training data','Kenyan data','HbAS (Kenyan)'),
-       col = c(mycols,'black'), pch=c(17,15,18))
+       legend = c('Training data','Kenyan data'),
+       col = c(mycols), pch=c(17,15))
 ```
 
 ![](Mixture_modelling_files/figure-html/seminar_fig-3.png)<!-- -->
@@ -572,37 +578,6 @@ Full model
 biomarker_vars = c('log10_platelet_imputed',
                    'log10_wbc_imputed_corrected')
 contamination_model = stan_model(file = 'contamination_model.stan')
-```
-
-```
-## Trying to compile a simple C file
-```
-
-```
-## Running /Library/Frameworks/R.framework/Resources/bin/R CMD SHLIB foo.c
-## clang -mmacosx-version-min=10.13 -I"/Library/Frameworks/R.framework/Resources/include" -DNDEBUG   -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/Rcpp/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/unsupported"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/BH/include" -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/src/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppParallel/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/rstan/include" -DEIGEN_NO_DEBUG  -DBOOST_DISABLE_ASSERTS  -DBOOST_PENDING_INTEGER_LOG2_HPP  -DSTAN_THREADS  -DBOOST_NO_AUTO_PTR  -include '/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp'  -D_REENTRANT -DRCPP_PARALLEL_USE_TBB=1   -I/usr/local/include   -fPIC  -Wall -g -O2  -c foo.c -o foo.o
-## In file included from <built-in>:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp:13:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Dense:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Core:88:
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/src/Core/util/Macros.h:613:1: error: unknown type name 'namespace'
-## namespace Eigen {
-## ^
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/src/Core/util/Macros.h:613:16: error: expected ';' after top level declarator
-## namespace Eigen {
-##                ^
-##                ;
-## In file included from <built-in>:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp:13:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Dense:1:
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Core:96:10: fatal error: 'complex' file not found
-## #include <complex>
-##          ^~~~~~~~~
-## 3 errors generated.
-## make: *** [foo.o] Error 1
-```
-
-```r
 dat_kenya$Ref_Model_Likelihood = dmvt(x = dat_kenya[, biomarker_vars], 
                                       delta = Model_mu, 
                                       sigma = Model_sigma, 
@@ -639,7 +614,7 @@ print(N2_sickle)
 ```
 
 ```
-## [1] 4
+## [1] 6
 ```
 
 ```r
@@ -657,7 +632,7 @@ print(Nunknown_sickle)
 ```
 
 ```
-## [1] 53
+## [1] 51
 ```
 
 ```r
@@ -670,25 +645,13 @@ out_mod=sampling(object = contamination_model,
                              N2 = N2,
                              N2_sickle = N2_sickle,
                              b1 = 5, b2=95, a1=1, a2=99), iter=10^5)
-```
-
-```
-## Warning: There were 1 divergent transitions after warmup. Increasing adapt_delta above 0.8 may help. See
-## http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
-```
-
-```
-## Warning: Examine the pairs() plot to diagnose sampling problems
-```
-
-```r
 thetas_contam = extract(out_mod)
 print(quantile(1-thetas_contam$q, probs = c(0.025, .5, .975)))
 ```
 
 ```
 ##      2.5%       50%     97.5% 
-## 0.3107815 0.5281657 0.7656431
+## 0.3687138 0.6037077 0.8871704
 ```
 
 ```r
@@ -696,7 +659,7 @@ print(100*mean(thetas_contam$p1))
 ```
 
 ```
-## [1] 5.370524
+## [1] 5.369509
 ```
 
 ```r
@@ -704,7 +667,7 @@ print(100*mean(thetas_contam$p2))
 ```
 
 ```
-## [1] 0.9599943
+## [1] 1.33503
 ```
 
 ```r
@@ -718,7 +681,7 @@ writeLines(sprintf('The proportion of individuals in the dataset with severe mal
 ```
 
 ```
-## The proportion of individuals in the dataset with severe malaria is 62% (95% credible interval 45-81)
+## The proportion of individuals in the dataset with severe malaria is 68% (95% credible interval 50-91)
 ```
 
 
@@ -729,37 +692,7 @@ Priors
 
 ```r
 source('stan_mixture_model_student2.R')
-```
 
-```
-## Trying to compile a simple C file
-```
-
-```
-## Running /Library/Frameworks/R.framework/Resources/bin/R CMD SHLIB foo.c
-## clang -mmacosx-version-min=10.13 -I"/Library/Frameworks/R.framework/Resources/include" -DNDEBUG   -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/Rcpp/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/unsupported"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/BH/include" -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/src/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppParallel/include/"  -I"/Library/Frameworks/R.framework/Versions/4.0/Resources/library/rstan/include" -DEIGEN_NO_DEBUG  -DBOOST_DISABLE_ASSERTS  -DBOOST_PENDING_INTEGER_LOG2_HPP  -DSTAN_THREADS  -DBOOST_NO_AUTO_PTR  -include '/Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp'  -D_REENTRANT -DRCPP_PARALLEL_USE_TBB=1   -I/usr/local/include   -fPIC  -Wall -g -O2  -c foo.c -o foo.o
-## In file included from <built-in>:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp:13:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Dense:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Core:88:
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/src/Core/util/Macros.h:613:1: error: unknown type name 'namespace'
-## namespace Eigen {
-## ^
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/src/Core/util/Macros.h:613:16: error: expected ';' after top level declarator
-## namespace Eigen {
-##                ^
-##                ;
-## In file included from <built-in>:1:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/StanHeaders/include/stan/math/prim/mat/fun/Eigen.hpp:13:
-## In file included from /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Dense:1:
-## /Library/Frameworks/R.framework/Versions/4.0/Resources/library/RcppEigen/include/Eigen/Core:96:10: fatal error: 'complex' file not found
-## #include <complex>
-##          ^~~~~~~~~
-## 3 errors generated.
-## make: *** [foo.o] Error 1
-```
-
-```r
 mu_priorSM = c(1.8, .95)
 mu_prior_notSM = c(2.5, 1.5)
 sd_prior_notSM = c(.25, .25)
@@ -809,9 +742,9 @@ round(out_mod_student_ML$par[grep('theta', names(out_mod_student_ML$par))],2)
 
 ```
 ##       theta_SM  theta_SMstudy theta_notSM[1] theta_notSM[2] theta_notSM[3] 
-##           0.54           0.05           0.01           0.01           0.02 
+##           0.58           0.03           0.46           0.01           0.49 
 ## theta_notSM[4] theta_notSM[5] theta_notSM[6] 
-##           0.61           0.01           0.33
+##           0.00           0.01           0.03
 ```
 
 ```r
@@ -820,15 +753,15 @@ round(10^out_mod_student_ML$par[grep('mu_', names(out_mod_student_ML$par))],1)
 
 ```
 ##         mu_SM[1]         mu_SM[2] mu_SM_study[1,1] mu_SM_study[2,1] 
-##             68.6              8.4             57.7             83.5 
+##             68.2              8.5             57.7             81.7 
 ## mu_SM_study[1,2] mu_SM_study[2,2]    mu_notSM[1,1]    mu_notSM[2,1] 
-##              8.2              8.5            248.6            163.1 
+##              8.2              8.8            266.8            220.7 
 ##    mu_notSM[3,1]    mu_notSM[4,1]    mu_notSM[5,1]    mu_notSM[6,1] 
-##            459.3            126.5            373.0            264.2 
+##            126.7            181.6            436.8            100.3 
 ##    mu_notSM[1,2]    mu_notSM[2,2]    mu_notSM[3,2]    mu_notSM[4,2] 
-##             22.0             39.0             30.0             18.3 
+##             11.4             29.7             20.4             40.9 
 ##    mu_notSM[5,2]    mu_notSM[6,2] 
-##             19.6             10.8
+##             31.8             24.2
 ```
 
 ```r
@@ -837,15 +770,15 @@ round(10^out_mod_student_ML$par[grep('mu', names(out_mod_student_ML$par))])
 
 ```
 ##         mu_SM[1]         mu_SM[2] mu_SM_study[1,1] mu_SM_study[2,1] 
-##               69                8               58               84 
+##               68                9               58               82 
 ## mu_SM_study[1,2] mu_SM_study[2,2]    mu_notSM[1,1]    mu_notSM[2,1] 
-##                8                9              249              163 
+##                8                9              267              221 
 ##    mu_notSM[3,1]    mu_notSM[4,1]    mu_notSM[5,1]    mu_notSM[6,1] 
-##              459              126              373              264 
+##              127              182              437              100 
 ##    mu_notSM[1,2]    mu_notSM[2,2]    mu_notSM[3,2]    mu_notSM[4,2] 
-##               22               39               30               18 
+##               11               30               20               41 
 ##    mu_notSM[5,2]    mu_notSM[6,2]          sd_muSM 
-##               20               11                1
+##               32               24                1
 ```
 
 ```r
@@ -935,10 +868,12 @@ Fit GAMS to likelihood values (quantiles of) with platelets/wbc/parasitaemia
 
 
 ```r
-par(las=1, bty='n', family='serif', mfrow=c(2,2),cex.lab=1.5, cex.axis=1.5)
+par(las=1, bty='n', family='serif', mfrow=c(2,2),
+    cex.lab=1.5, cex.axis=1.5)
+layout(mat = matrix(c(1,1,1,2,2,2,3,3,4,4,5,5),nrow = 2,byrow = T))
 
 hist(dat_kenya$P_SMs, breaks = 20, ylab = 'Number of patients',
-     xlab = 'P(Severe malaria | Data)', main='')
+     xlab = 'P(Severe malaria | Data)', main='', xlim=c(0,1))
 mtext(text = 'A', side = 3, adj = 0, cex = 1.5)
 
 f=colorRampPalette(colors = RColorBrewer::brewer.pal(name = 'RdYlBu',n = 11))
@@ -949,22 +884,23 @@ mycols = f(n_levels)
 plot(log10(dat_kenya$platelet),log10(dat_kenya$wbc),
      xlab='Platelet count (x1000 per uL)', xaxt='n', yaxt='n',
      ylab='White count (x1000 per uL)', pch=16, panel.first=grid(),
-     col = adjustcolor(mycols[cols_ind], .7))
+     col = adjustcolor(mycols[cols_ind], .7), ylim = c(log10(3),2))
 ind_sickle=dat_kenya$HbAS==1
 points(log10(dat_kenya$platelet)[ind_sickle],
        log10(dat_kenya$wbc)[ind_sickle], pch=18, cex=1.5)
 axis_points = list(1:3, 0:2)
 axis(side = 1, at = axis_points[[1]], 
      labels = 10^axis_points[[1]])
-axis(side = 2, at = axis_points[[2]], 
-     labels = 10^axis_points[[2]])
-axis(side = 1, at = log10(c(seq(10,100,by=10), seq(100,1000,by=100))), 
+axis(side = 2, at = log10(c(3,10,30,100)), 
+     labels = c(3,10,30,100))
+axis(side = 1, at = log10(c(seq(10,100,by=10),
+                            seq(100,1000,by=100))), 
      tick = T, labels = F)
-axis(side = 2, at = log10(c(seq(1,10,by=1), seq(10,100,by=10))), 
+axis(side = 2, at = log10(c(seq(3,10,by=1), seq(10,100,by=10))), 
      tick = T, labels = F)
 lgd_ = rep(NA, n_levels)
 lgd_[c(1,6,11)] = c(0,0.5,1)
-legend('bottomright',
+legend('topleft',
        legend = lgd_,
        fill = mycols,bty='n',x.intersp =.5,
        border = NA,inset = 0.01,
@@ -975,7 +911,7 @@ mtext(text = 'B', side = 3, adj = 0, cex = 1.5)
 
 
 myx = dat_kenya$P_SMs
-xs = seq(0,1,length.out = 100)[-1]
+xs = seq(min(myx),max(myx),length.out = 100)[-1]
 
 ##******** SICKLE ****************
 mod = gam(sickle_trait ~ s(x,k=4), family='binomial', 
@@ -1019,7 +955,7 @@ plot(xs, 100*inv.logit(preds$fit),type='l',lwd=3,
 polygon(c(xs, rev(xs)), ys,panel.first=grid(),
         border = NA, col = adjustcolor('grey',.3))
 mtext(text = 'C', side = 3, adj = 0, cex = 1.5)
-abline(h = 100*mean(dat_kenya$HbAS),lty=2, lwd=2)
+abline(h = 100*mean(dat_kenya$HbAS,na.rm = T),lty=2, lwd=2)
 
 
 writeLines('##******** DEATH ****************')
@@ -1076,9 +1012,44 @@ polygon(c(xs, rev(xs)),ys,panel.first=grid(),
 mtext(text = 'D', side = 3, adj = 0, cex = 1.5)
 abline(h = 100*mean(dat_kenya$died, na.rm = T),
        lty=2, lwd=2)
+
+writeLines('##******** PARASITE DENSITY ****************')
+```
+
+```
+## ##******** PARASITE DENSITY ****************
+```
+
+```r
+plot(dat_kenya$P_SMs, dat_kenya$log_parasites, pch=16, 
+     col = adjustcolor('grey', .4), xlim = c(0,1),
+     ylim = c(1.8, 6.3),
+     xlab='P(Severe malaria | Data)',
+     panel.first = grid(),yaxt='n',
+     ylab='Parasite density (per uL)')
+axis(2, at = 2:6, labels = c(expression(10^2),expression(10^3),                              expression(10^4),expression(10^5),expression(10^6)))
+mod = gam(log_parasites ~ s(P_SMs,k=4), data=dat_kenya)
+preds = predict(mod, se.fit = T, 
+                newdata = data.frame(P_SMs=xs))
+ys = c(preds$fit+1.96*preds$se.fit,
+       rev(preds$fit - 1.96*preds$se.fit))
+polygon(c(xs, rev(xs)),ys, 
+        border = NA, col = adjustcolor('grey',.6))
+lines(xs, preds$fit,lwd=3)
+mtext(text = 'E', side = 3, adj = 0, cex = 1.5)
+abline(h = mean(dat_kenya$log_parasites, na.rm = T),
+       lty=2, lwd=2)
 ```
 
 ![](Mixture_modelling_files/figure-html/sickle_mortality_model_validation-1.png)<!-- -->
+
+```r
+summary(mod)$s.pv
+```
+
+```
+## [1] 1.447634e-23
+```
 
 
 
@@ -1168,8 +1139,7 @@ writeLines(sprintf('For patients with P(SM|Data)>%s, %s%% died versus %s%% for p
 Save output
 
 ```r
-ws_dat = data.frame(#IID = dat_kenya$IID,
-                    ws = ps_post)
+ws_dat = data.frame(ws = ps_post)
 save(ws_dat, file = 'Outputs/patient_SM_weights.RData')
 save(dat_kenya, file = 'Outputs/Kenya_dat_PSM.RData')
 ```
