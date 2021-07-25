@@ -1,7 +1,6 @@
-**Improving statistical power in severe malaria genetic association studies by augmenting phenotypic precision** (eLife in press, 2021)
+**Improving statistical power in severe malaria genetic association studies by augmenting phenotypic precision** (eLife, 2021)
 
-The latest preprint version can be found at: https://www.biorxiv.org/content/10.1101/2021.04.16.440107v2
-
+https://elifesciences.org/articles/69698
 
 # Overview of repository
 
